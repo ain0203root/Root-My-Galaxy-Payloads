@@ -1,0 +1,1 @@
+The forensic-trace branch contains diagnostic-only native tracing. Production all/release/stable outputs remain separate.
