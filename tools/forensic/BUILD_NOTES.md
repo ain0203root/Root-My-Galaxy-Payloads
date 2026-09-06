@@ -1,0 +1,1 @@
+The forensic native build is isolated from production artifacts. `make forensic` emits `cve-2026-43499-app.forensic.so`; `all`, `release`, and `stable` continue to produce their existing outputs and do not link the diagnostic runtime.
