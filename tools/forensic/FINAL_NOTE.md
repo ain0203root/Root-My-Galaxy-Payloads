@@ -1,0 +1,1 @@
+See forensic-payload.yml. It builds cve-2026-43499-app.forensic.so separately from production artifacts and uploads the trace tooling.
