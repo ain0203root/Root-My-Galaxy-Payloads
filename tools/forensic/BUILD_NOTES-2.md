@@ -1,0 +1,1 @@
+The forensic native build is isolated from production artifacts. `make forensic` emits a separate diagnostic `.so`; the existing production targets remain the baseline.
