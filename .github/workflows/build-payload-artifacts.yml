@@ -34,6 +34,61 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Recover util.c tail only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import difflib
+          import subprocess
+
+          path = Path('src/util.c')
+          current = path.read_text()
+          marker = '/* rest of util.c unchanged */'
+          if current.count(marker) != 1:
+              raise SystemExit('util.c recovery marker missing or duplicated')
+
+          prefix, _ = current.split(marker, 1)
+          prefix = prefix.rstrip() + '\n'
+          base = subprocess.check_output(
+              ['git', 'show', '143759e3300690a09e863be0b953e122bb42285d:src/util.c'],
+              text=True,
+          )
+          clone_start = base.index('int clone_memfd(void) {')
+          clone_end = base.index('\n}', clone_start) + 2
+          base_clone = base[clone_start:clone_end]
+          if not prefix.rstrip().endswith(base_clone):
+              raise SystemExit('current util.c does not end at the expected clone_memfd() boundary')
+
+          new_text = prefix + base[clone_end:]
+          path.write_text(new_text)
+
+          before_marker = current[:current.index(marker)]
+          before_new = new_text[:new_text.index(base[clone_end:])]
+          if before_new != prefix:
+              raise SystemExit('prefix preservation assertion failed')
+
+          removed = list(difflib.unified_diff(
+              before_marker.splitlines(True),
+              before_new.splitlines(True),
+              fromfile='current-prefix',
+              tofile='recovered-prefix',
+          ))
+          print('=== PREFIX DIFF (must be empty) ===')
+          print(''.join(removed), end='')
+          print('=== RECOVERY BOUNDARY ===')
+          print(f'clone_memfd() ends at base offset {clone_end} bytes')
+          print(f'restored_tail_lines={len(new_text.splitlines()) - len(prefix.splitlines())}')
+          print('=== TAIL SYMBOL CHECK ===')
+          for symbol in ('prepare_good_kernel_page', 'prepare_kernel_page', 'configfs_write_once', 'configfs_read_once', 'kernel_read64', 'kernel_write_data', 'kernel_read_data'):
+              if symbol not in new_text:
+                  raise SystemExit(f'missing recovered symbol: {symbol}')
+              print(symbol)
+          PY
+          test "$(tail -n 1 src/util.c)" != '/* rest of util.c unchanged */'
+          git diff --check
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
@@ -114,16 +169,18 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Commit regenerated S24 FE artifact
+      - name: Commit recovered util.c and restore workflow
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "${ARTIFACT_PATH}"
+          git checkout HEAD^ -- .github/workflows/build-payload-artifacts.yml
+          git add src/util.c .github/workflows/build-payload-artifacts.yml
           if git diff --cached --quiet; then
-            echo "No S24 FE artifact changes."
+            echo "No util.c recovery changes."
             exit 0
           fi
-          git commit -m "ci: rebuild S24 FE payload artifact [skip ci]"
+          git diff --cached --check
+          git commit -m "fix: restore util.c tail only [skip ci]"
           git push origin HEAD:main
