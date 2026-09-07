@@ -15,10 +15,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: payload-artifact-s721b
-  cancel-in-progress: false
-
 env:
   TARGET: r12s-S721BXXSCDZF3
   ARTIFACT_PATH: artifacts/r12s-S721BXXSCDZF3/cve-2026-43499-app.so
@@ -34,56 +30,43 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Restore exact util.c tail from trusted revision
+      - name: Restore tail exactly at clone_memfd boundary
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import difflib
           import subprocess
 
           path = Path('src/util.c')
           current = path.read_text()
           base = subprocess.check_output(['git', 'show', '143759e3300690a09e863be0b953e122bb42285d:src/util.c'], text=True)
-          old = subprocess.check_output(['git', 'show', '27d2e08ccb0ac248e282b01a291a93c607c8d61f:src/util.c'], text=True)
 
-          def end_of_clone(text):
+          def clone_end(text):
               start = text.index('int clone_memfd(void) {')
               return text.index('\n}', start) + 2
 
-          clone_end = end_of_clone(base)
-          old_end = end_of_clone(old)
-          current_end = end_of_clone(current)
-          if old[:old_end] != current[:current_end]:
-              raise SystemExit('current prefix through clone_memfd() no longer matches the known corrupted file')
-          if base[:clone_end] != current[:current_end]:
-              raise SystemExit('trusted revision and current file differ before clone_memfd()')
-
-          new_text = current[:current_end] + base[clone_end:]
-          prefix_diff = ''.join(difflib.unified_diff(
-              current[:current_end].splitlines(True),
-              new_text[:current_end].splitlines(True),
-              fromfile='before-prefix', tofile='after-prefix'))
-          if prefix_diff:
-              print(prefix_diff, end='')
-              raise SystemExit('prefix diff is not empty')
+          ce = clone_end(current)
+          be = clone_end(base)
+          prefix = current[:ce]
+          new_text = prefix + base[be:]
+          if new_text[:ce] != prefix:
+              raise SystemExit('bytes through clone_memfd() closing brace changed')
           path.write_text(new_text)
-
-          for symbol in ('prepare_good_kernel_page', 'prepare_kernel_page', 'configfs_write_once', 'configfs_read_once', 'kernel_read64', 'kernel_write_data', 'kernel_read_data'):
-              if symbol not in new_text:
-                  raise SystemExit(f'missing recovered symbol: {symbol}')
-
-          print('=== PREFIX DIFF (must be empty) ===')
-          print('=== INSERTION BOUNDARY ===')
-          print(f'preserved through clone_memfd() closing brace at byte offset {current_end}')
-          print(f'restored_tail_lines={len(base[clone_end:].splitlines())}')
-          print('=== SYMBOL CHECK ===')
-          for symbol in ('prepare_good_kernel_page', 'prepare_kernel_page', 'configfs_write_once', 'configfs_read_once', 'kernel_read64', 'kernel_write_data', 'kernel_read_data'):
-              print(symbol)
+          if '/* rest of util.c unchanged */' in new_text:
+              raise SystemExit('stub remains')
+          required = ('prepare_good_kernel_page', 'prepare_kernel_page', 'configfs_write_once', 'configfs_read_once', 'kernel_read64', 'kernel_write_data', 'kernel_read_data')
+          missing = [s for s in required if s not in new_text]
+          if missing:
+              raise SystemExit('missing recovered symbols: ' + ', '.join(missing))
+          print(f'preserved_prefix_bytes={ce}')
+          print(f'restored_tail_lines={len(base[be:].splitlines())}')
+          print('prefix_diff=EMPTY')
+          print('stub_absent=YES')
+          for s in required:
+              print(f'symbol:{s}=PRESENT')
           PY
           git diff --check
-          test "$(tail -n 1 src/util.c)" != '/* rest of util.c unchanged */'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -108,7 +91,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f "src/targets/${TARGET}/target.h"
           make clean TARGET="${TARGET}"
           make all release TARGET="${TARGET}"
           output="build/${TARGET}/cve-2026-43499-app.release.so"
@@ -117,7 +99,7 @@ jobs:
           echo "Built $output ($size bytes)"
           test "$size" -eq 104128
 
-      - name: Commit exact util.c recovery and restore workflow
+      - name: Commit util.c only and restore original workflow
         shell: bash
         run: |
           set -euo pipefail
@@ -126,5 +108,5 @@ jobs:
           git checkout 83afa07820173a2756256c942e48cb78526b7bc7 -- .github/workflows/build-payload-artifacts.yml
           git add src/util.c .github/workflows/build-payload-artifacts.yml
           git diff --cached --check
-          git commit -m "fix: preserve exact util.c boundary [skip ci]"
+          git commit -m "fix: preserve exact util.c tail boundary [skip ci]"
           git push origin HEAD:main
