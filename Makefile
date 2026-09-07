@@ -21,6 +21,13 @@ endif
 ifeq ($(TARGET),a53x-A536EXXSNGZG3)
 API := 31
 endif
+# The S24 FE target already carries APP_TRACEFS_KASLR_DIRECT and the
+# S928-compatible sched_blocked_reason/caller derivation. Enable the same
+# stable tracefs execution path for its normal app/release builds instead of
+# leaving that code behind the S928-only stable-build switch.
+ifeq ($(TARGET),r12s-S721BXXSCDZF3)
+APP_TARGET_CFLAGS := -DAPP_S928_STABLE_RACE=1
+endif
 
 TARGET_HEADER := src/targets/$(TARGET)/target.h
 TARGET_INCLUDE := targets/$(TARGET)/target.h
@@ -112,7 +119,7 @@ $(APP_RELEASE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h s
 	  -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
 	  $(TARGET_CFLAGS) \
 	  $(APP_PRELOAD_SRCS) -shared -pthread \
-	  $(APP_RELEASE_LINK_FLAGS) -o $@
+	  $(APP_RELEASE_LINK_FLAGS) -s -o $@
 	@test $$(stat -c %s $@) -le $(APP_RELEASE_SIZE)
 	truncate -s $(APP_RELEASE_SIZE) $@
 
@@ -124,6 +131,7 @@ $(APP_STABLE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h sr
 	  -ffunction-sections -fdata-sections \
 	  -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare \
 	  -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
+  $(TARGET_CFLAGS) \
 	  $(APP_PRELOAD_SRCS) -shared -pthread \
 	  -Wl,--gc-sections -Wl,--icf=all -s -o $@
 	@test $$(stat -c %s $@) -le $(APP_RELEASE_SIZE)
