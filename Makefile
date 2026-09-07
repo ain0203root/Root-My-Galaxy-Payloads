@@ -52,6 +52,12 @@ TARGET_CFLAGS :=
 APP_RELEASE_OPT := -Oz
 APP_RELEASE_LINK_FLAGS := -Wl,--gc-sections -Wl,--icf=all -s
 
+# Isolated diagnostic build. It never replaces release/stable artifacts.
+FORENSIC_COVERAGE_FLAGS := -g -O1 -fno-omit-frame-pointer -finstrument-functions -fsanitize-coverage=trace-pc-guard,trace-cmp,trace-gep,trace-div,no-prune
+FORENSIC_TRACE_SRCS := src/forensic_trace.c
+FORENSIC_TRACE_HDR := src/forensic_trace.h
+FORENSIC_APP := $(OUTDIR)/cve-2026-43499-app.forensic.so
+
 PRELOAD_SRCS := \
   src/main.c \
   src/util.c \
@@ -89,13 +95,15 @@ COMMON_CFLAGS := \
 
 .DEFAULT_GOAL := all
 
-.PHONY: all clean info release stable
+.PHONY: all clean info release stable forensic
 
 all: $(PRELOAD) $(APP_PRELOAD) $(ROOT_HELPER)
 
 release: $(APP_RELEASE)
 
 stable: $(APP_STABLE)
+
+forensic: $(FORENSIC_APP)
 
 $(OUTDIR):
 	mkdir -p $@
@@ -137,6 +145,10 @@ $(APP_STABLE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h sr
 	@test $$(stat -c %s $@) -le $(APP_RELEASE_SIZE)
 	truncate -s $(APP_RELEASE_SIZE) $@
 
+$(FORENSIC_APP): $(APP_PRELOAD_SRCS) $(FORENSIC_TRACE_SRCS) $(FORENSIC_TRACE_HDR) $(TARGET_HEADER) src/offset.h src/common.h src/kernelsnitch/*.h | $(OUTDIR)
+	$(TARGET_CC) -DAPP_PAYLOAD=1 $(APP_TARGET_CFLAGS) -fPIC $(FORENSIC_COVERAGE_FLAGS) $(COMMON_CFLAGS) $(APP_PRELOAD_SRCS) $(FORENSIC_TRACE_SRCS) \
+	  -shared -pthread -o $@
+
 info:
 	@echo "TARGET=$(TARGET)"
 	@echo "APP_TARGET_CFLAGS=$(APP_TARGET_CFLAGS)"
@@ -145,6 +157,7 @@ info:
 	@echo "APP_PRELOAD=$(APP_PRELOAD)"
 	@echo "APP_RELEASE=$(APP_RELEASE)"
 	@echo "APP_STABLE=$(APP_STABLE)"
+	@echo "APP_FORENSIC=$(FORENSIC_APP)"
 	@echo "ROOT_HELPER=$(ROOT_HELPER)"
 
 clean:

@@ -1,0 +1,37 @@
+name: forensic-payload
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Exact payload target/profile directory
+        required: true
+        default: r12s-S721BXXSCDZF3
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install NDK
+        run: |
+          sudo ${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager --install "platform-tools" "ndk;28.0.13004108"
+      - name: Build forensic payload
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/28.0.13004108
+        run: |
+          make TARGET="${{ inputs.target }}" ANDROID_NDK_HOME="$ANDROID_NDK_HOME" forensic
+      - name: Upload forensic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: forensic-${{ inputs.target }}
+          path: build/${{ inputs.target }}/cve-2026-43499-app.forensic.so
+      - name: Upload sources and metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: forensic-${{ inputs.target }}-sources
+          path: |
+            src/forensic_trace.c
+            src/forensic_trace.h
+            tools/forensic/analyze_trace.py
+            docs/FORENSIC_TRACE.md
