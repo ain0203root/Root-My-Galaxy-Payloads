@@ -15,6 +15,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: payload-artifact-s721b
+  cancel-in-progress: false
+
 env:
   TARGET: r12s-S721BXXSCDZF3
   ARTIFACT_PATH: artifacts/r12s-S721BXXSCDZF3/cve-2026-43499-app.so
@@ -29,44 +33,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Restore tail exactly at clone_memfd boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import subprocess
-
-          path = Path('src/util.c')
-          current = path.read_text()
-          base = subprocess.check_output(['git', 'show', '143759e3300690a09e863be0b953e122bb42285d:src/util.c'], text=True)
-
-          def clone_end(text):
-              start = text.index('int clone_memfd(void) {')
-              return text.index('\n}', start) + 2
-
-          ce = clone_end(current)
-          be = clone_end(base)
-          prefix = current[:ce]
-          new_text = prefix + base[be:]
-          if new_text[:ce] != prefix:
-              raise SystemExit('bytes through clone_memfd() closing brace changed')
-          path.write_text(new_text)
-          if '/* rest of util.c unchanged */' in new_text:
-              raise SystemExit('stub remains')
-          required = ('prepare_good_kernel_page', 'prepare_kernel_page', 'configfs_write_once', 'configfs_read_once', 'kernel_read64', 'kernel_write_data', 'kernel_read_data')
-          missing = [s for s in required if s not in new_text]
-          if missing:
-              raise SystemExit('missing recovered symbols: ' + ', '.join(missing))
-          print(f'preserved_prefix_bytes={ce}')
-          print(f'restored_tail_lines={len(base[be:].splitlines())}')
-          print('prefix_diff=EMPTY')
-          print('stub_absent=YES')
-          for s in required:
-              print(f'symbol:{s}=PRESENT')
-          PY
-          git diff --check
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -86,27 +52,78 @@ jobs:
           NDK_HOME="$(find "${ANDROID_SDK_ROOT}/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           test -n "$NDK_HOME"
           echo "ANDROID_NDK_HOME=$NDK_HOME" >> "$GITHUB_ENV"
+          echo "Using ANDROID_NDK_HOME=$NDK_HOME"
 
       - name: Build only S24 FE target
         shell: bash
         run: |
           set -euo pipefail
+          test -f "src/targets/${TARGET}/target.h"
+          echo "=== BUILD ${TARGET} ONLY ==="
           make clean TARGET="${TARGET}"
           make all release TARGET="${TARGET}"
+
           output="build/${TARGET}/cve-2026-43499-app.release.so"
           test -f "$output"
           size="$(stat -c %s "$output")"
           echo "Built $output ($size bytes)"
-          test "$size" -eq 104128
 
-      - name: Commit util.c only and restore original workflow
+          mkdir -p "$(dirname "${ARTIFACT_PATH}")" diagnostics
+          install -m 0644 "$output" "${ARTIFACT_PATH}"
+          sha256sum "${ARTIFACT_PATH}" | tee diagnostics/s721b-app.sha256
+
+      - name: Verify S24 FE artifact only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "${ARTIFACT_PATH}"
+          actual="$(stat -c %s "${ARTIFACT_PATH}")"
+          test "$actual" -eq 104128
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from urllib.parse import urlparse
+
+          target = "r12s-S721BXXSCDZF3"
+          manifest = json.loads(Path('support/targets-v3.json').read_text())
+          candidates = [p for p in manifest.get('payloads', []) if p.get('payloadId') == target]
+          if not candidates:
+              raise SystemExit(f"S24 FE profile not found in manifest: {target}")
+
+          p = candidates[0]
+          url = p['exploit']['url']
+          path = urlparse(url).path
+          expected_suffix = f"/artifacts/{target}/cve-2026-43499-app.so"
+          if not path.endswith(expected_suffix):
+              raise SystemExit(f"S24 FE exploit URL does not point to {expected_suffix}: {url}")
+
+          expected = int(p['exploit']['size'])
+          actual = Path('artifacts') / target / 'cve-2026-43499-app.so'
+          if actual.stat().st_size != expected:
+              raise SystemExit(f"S24 FE artifact size mismatch: {actual.stat().st_size} != {expected}")
+
+          print(f"verified S24 FE target {target}: {actual.stat().st_size} bytes")
+          PY
+
+      - name: Upload build diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: s721b-payload-build-diagnostics
+          path: diagnostics/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Commit regenerated S24 FE artifact
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout 83afa07820173a2756256c942e48cb78526b7bc7 -- .github/workflows/build-payload-artifacts.yml
-          git add src/util.c .github/workflows/build-payload-artifacts.yml
-          git diff --cached --check
-          git commit -m "fix: preserve exact util.c tail boundary [skip ci]"
+          git add "${ARTIFACT_PATH}"
+          if git diff --cached --quiet; then
+            echo "No S24 FE artifact changes."
+            exit 0
+          fi
+          git commit -m "ci: rebuild S24 FE payload artifact [skip ci]"
           git push origin HEAD:main
