@@ -1,6 +1,9 @@
 #ifndef OFFSET_H
 #define OFFSET_H
 
+#include <stddef.h>
+#include <stdint.h>
+
 #if defined(APP_PAYLOAD) && APP_PAYLOAD
 #define BUILD_VARIANT_LABEL \
   "r12s-S721BXXSCDZF3-app-production-slide8-fops8"
