@@ -97,6 +97,17 @@
 #define P0_ORACLE_PROBE_OFFSET 0x1f0000ULL
 #define P0_FINGERPRINT_HEADER \
   "targets/r12s-S721BXXSCDZF3/p0_fingerprint.h"
+
+/* Preserve the original diagnostic defaults when the fresh-session block is disabled. */
+#if !defined(APP_REQUIRE_FRESH_P0_SESSION) || !APP_REQUIRE_FRESH_P0_SESSION
+static int ready_ok __attribute__((unused)) = -1;
+static int guard_ok __attribute__((unused)) = -1;
+static size_t ready_elapsed_usec __attribute__((unused)) = 0;
+static size_t guard_elapsed_usec __attribute__((unused)) = 0;
+static uint64_t pselect_age_usec __attribute__((unused)) = 0;
+static char ready_wchan[64] __attribute__((unused)) = "<not-read>";
+static char guard_wchan[64] __attribute__((unused)) = "<not-read>";
+#endif
 #endif
 
 #define KERNELSNITCH_IDENTITY_START 0xffffff8000000000ULL
