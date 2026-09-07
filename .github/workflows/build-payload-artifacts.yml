@@ -34,7 +34,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify and normalize exact util.c recovery boundary
+      - name: Restore exact util.c tail from trusted revision
         shell: bash
         run: |
           set -euo pipefail
@@ -45,48 +45,45 @@ jobs:
 
           path = Path('src/util.c')
           current = path.read_text()
-          corrupt = subprocess.check_output(
-              ['git', 'show', '27d2e08ccb0ac248e282b01a291a93c607c8d61f:src/util.c'],
-              text=True,
-          )
-          base = subprocess.check_output(
-              ['git', 'show', '143759e3300690a09e863be0b953e122bb42285d:src/util.c'],
-              text=True,
-          )
-          clone_start = base.index('int clone_memfd(void) {')
-          clone_end = base.index('\n}', clone_start) + 2
-          base_clone = base[clone_start:clone_end]
-          corrupt_clone_end = corrupt.index('\n}', corrupt.index('int clone_memfd(void) {')) + 2
-          if corrupt[:corrupt_clone_end] != current[:corrupt_clone_end]:
-              raise SystemExit('current prefix through clone_memfd() was modified')
-          if current[:clone_end] != corrupt[:corrupt_clone_end]:
-              raise SystemExit('current util.c prefix through clone_memfd() differs from the pre-recovery file')
+          base = subprocess.check_output(['git', 'show', '143759e3300690a09e863be0b953e122bb42285d:src/util.c'], text=True)
+          old = subprocess.check_output(['git', 'show', '27d2e08ccb0ac248e282b01a291a93c607c8d61f:src/util.c'], text=True)
 
-          new_text = current[:clone_end] + base[clone_end:]
+          def end_of_clone(text):
+              start = text.index('int clone_memfd(void) {')
+              return text.index('\n}', start) + 2
+
+          clone_end = end_of_clone(base)
+          old_end = end_of_clone(old)
+          current_end = end_of_clone(current)
+          if old[:old_end] != current[:current_end]:
+              raise SystemExit('current prefix through clone_memfd() no longer matches the known corrupted file')
+          if base[:clone_end] != current[:current_end]:
+              raise SystemExit('trusted revision and current file differ before clone_memfd()')
+
+          new_text = current[:current_end] + base[clone_end:]
           prefix_diff = ''.join(difflib.unified_diff(
-              current[:clone_end].splitlines(True),
-              new_text[:clone_end].splitlines(True),
+              current[:current_end].splitlines(True),
+              new_text[:current_end].splitlines(True),
               fromfile='before-prefix', tofile='after-prefix'))
           if prefix_diff:
               print(prefix_diff, end='')
               raise SystemExit('prefix diff is not empty')
-
           path.write_text(new_text)
-          if new_text.endswith('/* rest of util.c unchanged */'):
-              raise SystemExit('recovery marker still present')
+
           for symbol in ('prepare_good_kernel_page', 'prepare_kernel_page', 'configfs_write_once', 'configfs_read_once', 'kernel_read64', 'kernel_write_data', 'kernel_read_data'):
               if symbol not in new_text:
                   raise SystemExit(f'missing recovered symbol: {symbol}')
 
-          print('=== EXACT PREFIX DIFF (must be empty) ===')
+          print('=== PREFIX DIFF (must be empty) ===')
           print('=== INSERTION BOUNDARY ===')
-          print(f'preserved through clone_memfd() closing brace at base byte offset {clone_end}')
-          print(f'inserted_lines_after_brace={len(new_text[clone_end:].splitlines())}')
+          print(f'preserved through clone_memfd() closing brace at byte offset {current_end}')
+          print(f'restored_tail_lines={len(base[clone_end:].splitlines())}')
           print('=== SYMBOL CHECK ===')
           for symbol in ('prepare_good_kernel_page', 'prepare_kernel_page', 'configfs_write_once', 'configfs_read_once', 'kernel_read64', 'kernel_write_data', 'kernel_read_data'):
               print(symbol)
           PY
           git diff --check
+          test "$(tail -n 1 src/util.c)" != '/* rest of util.c unchanged */'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -129,5 +126,5 @@ jobs:
           git checkout 83afa07820173a2756256c942e48cb78526b7bc7 -- .github/workflows/build-payload-artifacts.yml
           git add src/util.c .github/workflows/build-payload-artifacts.yml
           git diff --cached --check
-          git commit -m "fix: preserve exact util.c recovery boundary [skip ci]"
+          git commit -m "fix: preserve exact util.c boundary [skip ci]"
           git push origin HEAD:main
