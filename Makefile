@@ -21,12 +21,18 @@ endif
 ifeq ($(TARGET),a53x-A536EXXSNGZG3)
 API := 31
 endif
-# The S24 FE target already carries APP_TRACEFS_KASLR_DIRECT and the
-# S928-compatible sched_blocked_reason/caller derivation. Enable the same
-# stable tracefs execution path for its normal app/release builds instead of
-# leaving that code behind the S928-only stable-build switch.
+
+# ============================================================
+# Изменения для r12s-S721BXXSCDZF3:
+# Принудительно включаем детерминированный обход KASLR через tracefs
+# и отключаем вероятностный метод physical p0.
+# ============================================================
 ifeq ($(TARGET),r12s-S721BXXSCDZF3)
-APP_TARGET_CFLAGS := -DAPP_S928_STABLE_RACE=1
+APP_TARGET_CFLAGS := -DAPP_S928_STABLE_RACE=1 \
+                     -DAPP_TRACEFS_SLIDE=1 \
+                     -DSLIDE_TRACEFS_EVENT_ID=109 \
+                     -UAPP_PHYS_P0_ORACLE \
+                     -DAPP_PHYS_P0_ORACLE=0
 endif
 
 TARGET_HEADER := src/targets/$(TARGET)/target.h
@@ -98,54 +104,54 @@ release: $(APP_RELEASE)
 stable: $(APP_STABLE)
 
 $(OUTDIR):
-	mkdir -p $@
+        mkdir -p $@
 
 $(PRELOAD): $(PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h src/kernelsnitch/*.h | $(OUTDIR)
-	$(TARGET_CC) -fPIC $(COMMON_CFLAGS) $(PRELOAD_SRCS) \
-	  -shared -pthread -o $@
+        $(TARGET_CC) -fPIC $(COMMON_CFLAGS) $(PRELOAD_SRCS) \
+          -shared -pthread -o $@
 
 $(ROOT_HELPER): src/su_daemon.c | $(OUTDIR)
-	$(TARGET_CC) -fPIE -pie -O2 -g0 -Wall -Wextra $< -ldl -o $@
+        $(TARGET_CC) -fPIE -pie -O2 -g0 -Wall -Wextra $< -ldl -o $@
 
 $(APP_PRELOAD): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h src/kernelsnitch/*.h | $(OUTDIR)
-	$(TARGET_CC) -DAPP_PAYLOAD=1 $(APP_TARGET_CFLAGS) -fPIC $(COMMON_CFLAGS) $(APP_PRELOAD_SRCS) \
-	  -shared -pthread -o $@
+        $(TARGET_CC) -DAPP_PAYLOAD=1 $(APP_TARGET_CFLAGS) -fPIC $(COMMON_CFLAGS) $(APP_PRELOAD_SRCS) \
+          -shared -pthread -o $@
 
 $(APP_RELEASE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h src/kernelsnitch/*.h | $(OUTDIR)
-	$(TARGET_CC) -DAPP_PAYLOAD=1 $(APP_TARGET_CFLAGS) -fPIC $(APP_RELEASE_OPT) -g0 \
-	  -fno-unwind-tables -fno-asynchronous-unwind-tables \
-	  -ffunction-sections -fdata-sections \
-	  -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare \
-	  -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
-	  $(TARGET_CFLAGS) \
-	  $(APP_PRELOAD_SRCS) -shared -pthread \
-	  $(APP_RELEASE_LINK_FLAGS) -o $@
-	@test $$(stat -c %s $@) -le $(APP_RELEASE_SIZE)
-	truncate -s $(APP_RELEASE_SIZE) $@
+        $(TARGET_CC) -DAPP_PAYLOAD=1 $(APP_TARGET_CFLAGS) -fPIC $(APP_RELEASE_OPT) -g0 \
+          -fno-unwind-tables -fno-asynchronous-unwind-tables \
+          -ffunction-sections -fdata-sections \
+          -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare \
+          -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
+          $(TARGET_CFLAGS) \
+          $(APP_PRELOAD_SRCS) -shared -pthread \
+          $(APP_RELEASE_LINK_FLAGS) -o $@
+        @test $$(stat -c %s $@) -le $(APP_RELEASE_SIZE)
+        truncate -s $(APP_RELEASE_SIZE) $@
 
 $(APP_STABLE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h src/kernelsnitch/*.h | $(OUTDIR)
-	$(TARGET_CC) -DAPP_PAYLOAD=1 -DAPP_S928_STABLE_RACE=1 \
-	  -fPIC -Oz -g0 -fvisibility=hidden -fno-semantic-interposition \
-	  -fstack-protector-strong \
-	  -fno-unwind-tables -fno-asynchronous-unwind-tables \
-	  -ffunction-sections -fdata-sections \
-	  -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare \
-	  -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
-	  $(TARGET_CFLAGS) \
-	  $(APP_PRELOAD_SRCS) -shared -pthread \
-	  -Wl,--gc-sections -Wl,--icf=all -s -o $@
-	@test $$(stat -c %s $@) -le $(APP_RELEASE_SIZE)
-	truncate -s $(APP_RELEASE_SIZE) $@
+        $(TARGET_CC) -DAPP_PAYLOAD=1 -DAPP_S928_STABLE_RACE=1 \
+          -fPIC -Oz -g0 -fvisibility=hidden -fno-semantic-interposition \
+          -fstack-protector-strong \
+          -fno-unwind-tables -fno-asynchronous-unwind-tables \
+          -ffunction-sections -fdata-sections \
+          -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare \
+          -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
+          $(TARGET_CFLAGS) \
+          $(APP_PRELOAD_SRCS) -shared -pthread \
+          -Wl,--gc-sections -Wl,--icf=all -s -o $@
+        @test $$(stat -c %s $@) -le $(APP_RELEASE_SIZE)
+        truncate -s $(APP_RELEASE_SIZE) $@
 
 info:
-	@echo "TARGET=$(TARGET)"
-	@echo "APP_TARGET_CFLAGS=$(APP_TARGET_CFLAGS)"
-	@echo "TARGET_CC=$(TARGET_CC)"
-	@echo "PRELOAD=$(PRELOAD)"
-	@echo "APP_PRELOAD=$(APP_PRELOAD)"
-	@echo "APP_RELEASE=$(APP_RELEASE)"
-	@echo "APP_STABLE=$(APP_STABLE)"
-	@echo "ROOT_HELPER=$(ROOT_HELPER)"
+        @echo "TARGET=$(TARGET)"
+        @echo "APP_TARGET_CFLAGS=$(APP_TARGET_CFLAGS)"
+        @echo "TARGET_CC=$(TARGET_CC)"
+        @echo "PRELOAD=$(PRELOAD)"
+        @echo "APP_PRELOAD=$(APP_PRELOAD)"
+        @echo "APP_RELEASE=$(APP_RELEASE)"
+        @echo "APP_STABLE=$(APP_STABLE)"
+        @echo "ROOT_HELPER=$(ROOT_HELPER)"
 
 clean:
-	rm -rf $(OUTDIR)
+        rm -rf $(OUTDIR)
