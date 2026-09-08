@@ -452,11 +452,13 @@ int run_exploit(int argc, char **argv) {
     return 0;
   }
 #if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
-  if (!slide_p0_session_fresh) {
-    pr_error("full route requires P0 discovery in the current exploit process; "
-             "refusing forced or retained cross-process slide\n");
-    return 1;
-  }
+  #if !defined(APP_TRACEFS_KASLR_DIRECT) || !APP_TRACEFS_KASLR_DIRECT
+    if (!slide_p0_session_fresh) {
+      pr_error("full route requires P0 discovery in the current exploit process; "
+               "refusing forced or retained cross-process slide\n");
+      return 1;
+    }
+  #endif
 #endif
 
 #if defined(APP_FOPS_DATA_ALIAS_DIAG_ONLY) && \
