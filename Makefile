@@ -22,15 +22,9 @@ ifeq ($(TARGET),a53x-A536EXXSNGZG3)
 API := 31
 endif
 
-# ============================================================
-# Для r12s-S721BXXSCDZF3:
-# - APP_S928_STABLE_RACE=1 включает stable tracefs execution path
-# - отключаем APP_PHYS_P0_ORACLE, чтобы не было 24 попыток
-# ============================================================
+# Включаем stable tracefs execution path
 ifeq ($(TARGET),r12s-S721BXXSCDZF3)
-APP_TARGET_CFLAGS := -DAPP_S928_STABLE_RACE=1 \
-                     -UAPP_PHYS_P0_ORACLE \
-                     -DAPP_PHYS_P0_ORACLE=0
+APP_TARGET_CFLAGS := -DAPP_S928_STABLE_RACE=1
 endif
 
 TARGET_HEADER := src/targets/$(TARGET)/target.h
