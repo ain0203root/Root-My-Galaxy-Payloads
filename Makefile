@@ -1,5 +1,5 @@
 API ?= 35
-TARGET ?= pa3q-S938NKSUACZF1
+TARGET ?= r12s-S721BXXSCDZF3   # ← изменено с pa3q-S938NKSUACZF1 на твой профиль
 OUTDIR ?= build/$(TARGET)
 
 APP_TARGET_CFLAGS :=
@@ -22,9 +22,9 @@ ifeq ($(TARGET),a53x-A536EXXSNGZG3)
 API := 31
 endif
 
-# Включаем stable tracefs execution path
+# Секция для твоего профиля — никаких флагов
 ifeq ($(TARGET),r12s-S721BXXSCDZF3)
-APP_TARGET_CFLAGS := -DAPP_S928_STABLE_RACE=1
+APP_TARGET_CFLAGS :=
 endif
 
 TARGET_HEADER := src/targets/$(TARGET)/target.h
@@ -129,7 +129,6 @@ $(APP_STABLE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h sr
 	  -ffunction-sections -fdata-sections \
 	  -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare \
 	  -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
-	  $(TARGET_CFLAGS) \
 	  $(APP_PRELOAD_SRCS) -shared -pthread \
 	  -Wl,--gc-sections -Wl,--icf=all -s -o $@
 	@test $$(stat -c %s $@) -le $(APP_RELEASE_SIZE)
