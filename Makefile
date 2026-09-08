@@ -3,13 +3,13 @@ TARGET ?= r12s-S721BXXSCDZF3   # ← изменено с pa3q-S938NKSUACZF1 на
 OUTDIR ?= build/$(TARGET)
 
 APP_TARGET_CFLAGS :=
-ifeq ($(TARGET),dm2q-S916BXXSAFZG1)
+ifeq ($(TARGET),dm2q-S916XXSAFZG1)
 APP_TARGET_CFLAGS := -DSLIDE_STACK_WRITER=1
 endif
-ifeq ($(TARGET),dm3q-S918BXXSAFZF5)
+ifeq ($(TARGET),dm3q-S918U1UES6DYI3)
 APP_TARGET_CFLAGS := -DSLIDE_STACK_WRITER=1
 endif
-ifeq ($(TARGET),gts9u-X916BXXS6EZG3)
+ifeq ($(TARGET),gts9u-X916XXS6EZG3)
 APP_TARGET_CFLAGS := -DSLIDE_STACK_WRITER=1
 endif
 ifeq ($(TARGET),dm1q-S911U1UES6DYI3)
@@ -47,7 +47,7 @@ APP_STABLE := $(OUTDIR)/cve-2026-43499-app.stable.so
 APP_RELEASE_SIZE := 104128
 ROOT_HELPER := $(OUTDIR)/cve-2026-43499-root
 TARGET_CFLAGS :=
-APP_RELEASE_OPT := -Oz
+APP_RELEASE_OPT := -Oz -fvisibility=hidden -fno-semantic-interposition
 APP_RELEASE_LINK_FLAGS := -Wl,--gc-sections -Wl,--icf=all -s
 
 PRELOAD_SRCS := \
@@ -63,37 +63,10 @@ APP_PRELOAD_SRCS := \
   src/main.c \
   src/util.c \
   src/slide_app.c \
-  src/fops.c \
-  src/pipe.c \
-  src/root.c \
+  src/fops_app.c \
   src/preload.c
 
-ifeq ($(TARGET),a53x-A536EXXSNGZG3)
-APP_PRELOAD_SRCS := \
-  src/targets/a53x-A536EXXSNGZG3/payload.c \
-  src/targets/a53x-A536EXXSNGZG3/chain.c \
-  src/targets/a53x-A536EXXSNGZG3/ghostlock.c \
-  src/targets/a53x-A536EXXSNGZG3/page.c
-PRELOAD_SRCS := $(APP_PRELOAD_SRCS)
-APP_RELEASE_OPT := -O2
-APP_RELEASE_LINK_FLAGS := -Wl,--gc-sections -Wl,--icf=all -s
-endif
-
-COMMON_CFLAGS := \
-  -O2 -g0 -Wall -Wextra \
-  -Wno-unused-parameter -Wno-sign-compare \
-  -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
-  $(TARGET_CFLAGS)
-
-.DEFAULT_GOAL := all
-
-.PHONY: all clean info release stable
-
-all: $(PRELOAD) $(APP_PRELOAD) $(ROOT_HELPER)
-
-release: $(APP_RELEASE)
-
-stable: $(APP_STABLE)
+COMMON_CFLAGS := -O2 -g -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"'
 
 $(OUTDIR):
 	mkdir -p $@
@@ -138,11 +111,3 @@ info:
 	@echo "TARGET=$(TARGET)"
 	@echo "APP_TARGET_CFLAGS=$(APP_TARGET_CFLAGS)"
 	@echo "TARGET_CC=$(TARGET_CC)"
-	@echo "PRELOAD=$(PRELOAD)"
-	@echo "APP_PRELOAD=$(APP_PRELOAD)"
-	@echo "APP_RELEASE=$(APP_RELEASE)"
-	@echo "APP_STABLE=$(APP_STABLE)"
-	@echo "ROOT_HELPER=$(ROOT_HELPER)"
-
-clean:
-	rm -rf $(OUTDIR)
