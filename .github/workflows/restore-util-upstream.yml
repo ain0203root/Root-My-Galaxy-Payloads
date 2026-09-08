@@ -1,0 +1,27 @@
+name: Restore util.c from upstream
+
+on:
+  push:
+    branches:
+      - restore-util-upstream
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore official util.c
+        run: |
+          set -e
+          curl -fsSL https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/src/util.c -o src/util.c
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/util.c
+          git diff --cached --quiet || git commit -m 'Restore src/util.c from upstream'
+          git push
