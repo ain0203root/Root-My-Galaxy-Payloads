@@ -23,5 +23,3 @@ jobs:
           git add src/util.c
           git diff --cached --quiet || git commit -m 'Restore src/util.c from upstream'
           git push
-
-# trigger restore
