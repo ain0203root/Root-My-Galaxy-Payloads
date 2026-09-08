@@ -14,8 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - name: Restore official util.c
         run: |
           set -e
@@ -25,3 +23,5 @@ jobs:
           git add src/util.c
           git diff --cached --quiet || git commit -m 'Restore src/util.c from upstream'
           git push
+
+# trigger restore
