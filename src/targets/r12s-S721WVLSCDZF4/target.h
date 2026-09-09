@@ -5,6 +5,8 @@
  * Experimental Canadian S24 FE target cloned from the verified S721B DZF3
  * profile. Keep this target isolated so W-specific offsets/geometry can be
  * tuned without changing the known-good S721B profile.
+ *
+ * Canadian bootstrap CI validation is intentionally driven from this target.
  */
 #if defined(APP_PAYLOAD) && APP_PAYLOAD
 #define BUILD_VARIANT_LABEL \
