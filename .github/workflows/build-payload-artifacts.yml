@@ -149,7 +149,12 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "artifacts/r12s-S721BXXSCDZF3/cve-2026-43499-app.so" "artifacts/r12s-S721WVLSCDZF4/cve-2026-43499-app.so"
+          if [ "${{ steps.select.outputs.build_b }}" = "1" ]; then
+            git add "${B_ARTIFACT_PATH}"
+          fi
+          if [ "${{ steps.select.outputs.build_w }}" = "1" ]; then
+            git add "${W_ARTIFACT_PATH}"
+          fi
           if git diff --cached --quiet; then
             echo "No artifact changes."
             exit 0
