@@ -1,12 +1,12 @@
 API ?= 35
-TARGET ?= r12s-S721BXXSCDZF3   # ← изменено с pa3q-S938NKSUACZF1 на твой профиль
+TARGET ?= r12s-S721BXXSCDZF3
 OUTDIR ?= build/$(TARGET)
 
 APP_TARGET_CFLAGS :=
-ifeq ($(TARGET),dm2q-S916BXXSAFZG1)
+ifeq ($(TARGET),dm2q-S916XXSAFZG1)
 APP_TARGET_CFLAGS := -DSLIDE_STACK_WRITER=1
 endif
-ifeq ($(TARGET),dm3q-S918BXXSAFZF5)
+ifeq ($(TARGET),dm3q-S918XXSAFZF5)
 APP_TARGET_CFLAGS := -DSLIDE_STACK_WRITER=1
 endif
 ifeq ($(TARGET),gts9u-X916XXS6EZG3)
@@ -21,9 +21,10 @@ endif
 ifeq ($(TARGET),a53x-A536EXXSNGZG3)
 API := 31
 endif
-
-# Секция для твоего профиля — никаких флагов
 ifeq ($(TARGET),r12s-S721BXXSCDZF3)
+APP_TARGET_CFLAGS :=
+endif
+ifeq ($(TARGET),r12s-S721WVLSCDZF4)
 APP_TARGET_CFLAGS :=
 endif
 
@@ -86,14 +87,20 @@ COMMON_CFLAGS := \
   $(TARGET_CFLAGS)
 
 .DEFAULT_GOAL := all
-
-.PHONY: all clean info release stable
+.PHONY: all clean info release stable s721b s721w s721w-release
 
 all: $(PRELOAD) $(APP_PRELOAD) $(ROOT_HELPER)
-
 release: $(APP_RELEASE)
-
 stable: $(APP_STABLE)
+
+s721b:
+	$(MAKE) TARGET=r12s-S721BXXSCDZF3 clean all release
+
+s721w:
+	$(MAKE) TARGET=r12s-S721WVLSCDZF4 clean all release
+
+s721w-release:
+	$(MAKE) TARGET=r12s-S721WVLSCDZF4 release
 
 $(OUTDIR):
 	mkdir -p $@
