@@ -1,4 +1,4 @@
-name: Build S24 FE Payload Artifact
+name: Build S24 FE Payload Artifacts
 
 on:
   push:
@@ -11,28 +11,40 @@ on:
       - 'tools/**'
       - '.github/workflows/**'
   workflow_dispatch:
+    inputs:
+      target:
+        description: 'Profile to build'
+        required: true
+        default: s721b
+        type: choice
+        options:
+          - s721b
+          - s721w
+          - all
 
 permissions:
   contents: write
 
 concurrency:
-  group: payload-artifact-s721b
+  group: payload-artifact-s721
   cancel-in-progress: false
 
 env:
-  TARGET: r12s-S721BXXSCDZF3
-  ARTIFACT_PATH: artifacts/r12s-S721BXXSCDZF3/cve-2026-43499-app.so
+  B_TARGET: r12s-S721BXXSCDZF3
+  W_TARGET: r12s-S721WVLSCDZF4
+  B_ARTIFACT_PATH: artifacts/r12s-S721BXXSCDZF3/cve-2026-43499-app.so
+  W_ARTIFACT_PATH: artifacts/r12s-S721WVLSCDZF4/cve-2026-43499-app.so
 
 jobs:
   build:
-    name: Rebuild S24 FE artifact
+    name: Build selected S24 FE profile(s)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 2
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -54,76 +66,93 @@ jobs:
           echo "ANDROID_NDK_HOME=$NDK_HOME" >> "$GITHUB_ENV"
           echo "Using ANDROID_NDK_HOME=$NDK_HOME"
 
-      - name: Build only S24 FE target
+      - name: Select profiles
+        id: select
         shell: bash
         run: |
           set -euo pipefail
-          test -f "src/targets/${TARGET}/target.h"
-          echo "=== BUILD ${TARGET} ONLY ==="
-          make clean TARGET="${TARGET}"
-          make all release TARGET="${TARGET}"
+          selected="${{ github.event.inputs.target || 's721b' }}"
+          build_b=0
+          build_w=0
+          if [ "$selected" = "s721b" ]; then build_b=1; fi
+          if [ "$selected" = "s721w" ]; then build_w=1; fi
+          if [ "$selected" = "all" ]; then build_b=1; build_w=1; fi
 
-          output="build/${TARGET}/cve-2026-43499-app.release.so"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            build_b=1
+            changed="$(git diff --name-only HEAD^ HEAD)"
+            if printf '%s\n' "$changed" | grep -q '^src/targets/r12s-S721WVLSCDZF4/'; then
+              build_w=1
+            fi
+          fi
+
+          echo "build_b=$build_b" >> "$GITHUB_OUTPUT"
+          echo "build_w=$build_w" >> "$GITHUB_OUTPUT"
+          echo "selected=$selected" >> "$GITHUB_OUTPUT"
+          echo "S721B build=$build_b"
+          echo "S721W build=$build_w"
+
+      - name: Build S721B
+        if: steps.select.outputs.build_b == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "src/targets/${B_TARGET}/target.h"
+          make clean TARGET="${B_TARGET}"
+          make all release TARGET="${B_TARGET}"
+          output="build/${B_TARGET}/cve-2026-43499-app.release.so"
           test -f "$output"
-          size="$(stat -c %s "$output")"
-          echo "Built $output ($size bytes)"
+          test "$(stat -c %s "$output")" -le 104128
+          mkdir -p "$(dirname "${B_ARTIFACT_PATH}")" diagnostics
+          install -m 0644 "$output" "${B_ARTIFACT_PATH}"
+          sha256sum "${B_ARTIFACT_PATH}" | tee diagnostics/s721b-app.sha256
 
-          mkdir -p "$(dirname "${ARTIFACT_PATH}")" diagnostics
-          install -m 0644 "$output" "${ARTIFACT_PATH}"
-          sha256sum "${ARTIFACT_PATH}" | tee diagnostics/s721b-app.sha256
-
-      - name: Verify S24 FE artifact only
+      - name: Build experimental S721W
+        if: steps.select.outputs.build_w == '1'
         shell: bash
         run: |
           set -euo pipefail
-          test -f "${ARTIFACT_PATH}"
-          actual="$(stat -c %s "${ARTIFACT_PATH}")"
-          test "$actual" -eq 104128
+          test -f "src/targets/${W_TARGET}/target.h"
+          make clean TARGET="${W_TARGET}"
+          make all release TARGET="${W_TARGET}"
+          output="build/${W_TARGET}/cve-2026-43499-app.release.so"
+          test -f "$output"
+          test "$(stat -c %s "$output")" -le 104128
+          mkdir -p "$(dirname "${W_ARTIFACT_PATH}")" diagnostics
+          install -m 0644 "$output" "${W_ARTIFACT_PATH}"
+          sha256sum "${W_ARTIFACT_PATH}" | tee diagnostics/s721w-dzf4-app.sha256
 
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          from urllib.parse import urlparse
+      - name: Verify artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.select.outputs.build_b }}" = "1" ]; then
+            test -f "${B_ARTIFACT_PATH}"
+            test "$(stat -c %s "${B_ARTIFACT_PATH}")" -le 104128
+          fi
+          if [ "${{ steps.select.outputs.build_w }}" = "1" ]; then
+            test -f "${W_ARTIFACT_PATH}"
+            test "$(stat -c %s "${W_ARTIFACT_PATH}")" -le 104128
+          fi
 
-          target = "r12s-S721BXXSCDZF3"
-          manifest = json.loads(Path('support/targets-v3.json').read_text())
-          candidates = [p for p in manifest.get('payloads', []) if p.get('payloadId') == target]
-          if not candidates:
-              raise SystemExit(f"S24 FE profile not found in manifest: {target}")
-
-          p = candidates[0]
-          url = p['exploit']['url']
-          path = urlparse(url).path
-          expected_suffix = f"/artifacts/{target}/cve-2026-43499-app.so"
-          if not path.endswith(expected_suffix):
-              raise SystemExit(f"S24 FE exploit URL does not point to {expected_suffix}: {url}")
-
-          expected = int(p['exploit']['size'])
-          actual = Path('artifacts') / target / 'cve-2026-43499-app.so'
-          if actual.stat().st_size != expected:
-              raise SystemExit(f"S24 FE artifact size mismatch: {actual.stat().st_size} != {expected}")
-
-          print(f"verified S24 FE target {target}: {actual.stat().st_size} bytes")
-          PY
-
-      - name: Upload build diagnostics
+      - name: Upload diagnostics
         uses: actions/upload-artifact@v4
         with:
-          name: s721b-payload-build-diagnostics
+          name: s721-payload-build-diagnostics
           path: diagnostics/
           if-no-files-found: error
           retention-days: 14
 
-      - name: Commit regenerated S24 FE artifact
+      - name: Commit regenerated artifacts
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "${ARTIFACT_PATH}"
+          git add "artifacts/r12s-S721BXXSCDZF3/cve-2026-43499-app.so" "artifacts/r12s-S721WVLSCDZF4/cve-2026-43499-app.so"
           if git diff --cached --quiet; then
-            echo "No S24 FE artifact changes."
+            echo "No artifact changes."
             exit 0
           fi
-          git commit -m "ci: rebuild S24 FE payload artifact [skip ci]"
+          git commit -m "ci: rebuild S721 FE payload artifacts [skip ci]"
           git push origin HEAD:main

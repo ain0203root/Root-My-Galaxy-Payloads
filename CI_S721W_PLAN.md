@@ -1,1 +1,0 @@
-This file is temporary CI planning metadata for the experimental S721W target.
