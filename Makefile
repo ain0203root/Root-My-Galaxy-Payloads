@@ -3,8 +3,6 @@ TARGET ?= r12s-S721BXXSCDZF3
 OUTDIR ?= build/$(TARGET)
 
 APP_TARGET_CFLAGS :=
-APP_CPU0_SRC :=
-APP_WRAP_FLAGS :=
 ifeq ($(TARGET),dm2q-S916XXSAFZG1)
 APP_TARGET_CFLAGS := -DSLIDE_STACK_WRITER=1
 endif
@@ -24,9 +22,7 @@ ifeq ($(TARGET),a53x-A536EXXSNGZG3)
 API := 31
 endif
 ifeq ($(TARGET),r12s-S721BXXSCDZF3)
-APP_TARGET_CFLAGS := -DAPP_CPU0_KASLR_SLIDE=1
-APP_CPU0_SRC := src/cpu0_slide.c
-APP_WRAP_FLAGS := -Wl,--wrap=slide_leak_kernel_base
+APP_TARGET_CFLAGS :=
 endif
 ifeq ($(TARGET),r12s-S721WVLSCDZF4)
 APP_TARGET_CFLAGS :=
@@ -71,8 +67,7 @@ APP_PRELOAD_SRCS := \
   src/fops.c \
   src/pipe.c \
   src/root.c \
-  src/preload.c \
-  $(APP_CPU0_SRC)
+  src/preload.c
 
 ifeq ($(TARGET),a53x-A536EXXSNGZG3)
 APP_PRELOAD_SRCS := \
@@ -119,7 +114,7 @@ $(ROOT_HELPER): src/su_daemon.c | $(OUTDIR)
 
 $(APP_PRELOAD): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h src/kernelsnitch/*.h | $(OUTDIR)
 	$(TARGET_CC) -DAPP_PAYLOAD=1 $(APP_TARGET_CFLAGS) -fPIC $(COMMON_CFLAGS) $(APP_PRELOAD_SRCS) \
-	  -shared -pthread $(APP_WRAP_FLAGS) -o $@
+	  -shared -pthread -o $@
 
 $(APP_RELEASE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h src/kernelsnitch/*.h | $(OUTDIR)
 	$(TARGET_CC) -DAPP_PAYLOAD=1 $(APP_TARGET_CFLAGS) -fPIC $(APP_RELEASE_OPT) -g0 \
@@ -129,7 +124,7 @@ $(APP_RELEASE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h s
 	  -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
 	  $(TARGET_CFLAGS) \
 	  $(APP_PRELOAD_SRCS) -shared -pthread \
-	  $(APP_RELEASE_LINK_FLAGS) $(APP_WRAP_FLAGS) -o $@
+	  $(APP_RELEASE_LINK_FLAGS) -o $@
 	@test $$(stat -c %s $@) -le $(APP_RELEASE_SIZE)
 	truncate -s $(APP_RELEASE_SIZE) $@
 
@@ -142,7 +137,7 @@ $(APP_STABLE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h sr
 	  -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare \
 	  -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
 	  $(APP_PRELOAD_SRCS) -shared -pthread \
-	  -Wl,--gc-sections -Wl,--icf=all -s $(APP_WRAP_FLAGS) -o $@
+	  -Wl,--gc-sections -Wl,--icf=all -s -o $@
 	@test $$(stat -c %s $@) -le $(APP_RELEASE_SIZE)
 	truncate -s $(APP_RELEASE_SIZE) $@
 
