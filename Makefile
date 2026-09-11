@@ -69,6 +69,17 @@ APP_PRELOAD_SRCS := \
   src/root.c \
   src/preload.c
 
+ifeq ($(TARGET),r12s-S721BXXSCDZF3)
+APP_PRELOAD_SRCS := \
+  src/main.c \
+  src/util.c \
+  src/slide_app_cpu0.c \
+  src/fops.c \
+  src/pipe.c \
+  src/root.c \
+  src/preload.c
+endif
+
 ifeq ($(TARGET),a53x-A536EXXSNGZG3)
 APP_PRELOAD_SRCS := \
   src/targets/a53x-A536EXXSNGZG3/payload.c \
@@ -136,6 +147,7 @@ $(APP_STABLE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h sr
 	  -ffunction-sections -fdata-sections \
 	  -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare \
 	  -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
+	  $(TARGET_CFLAGS) \
 	  $(APP_PRELOAD_SRCS) -shared -pthread \
 	  -Wl,--gc-sections -Wl,--icf=all -s -o $@
 	@test $$(stat -c %s $@) -le $(APP_RELEASE_SIZE)
