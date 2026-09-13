@@ -51,6 +51,8 @@ TARGET_CFLAGS :=
 APP_RELEASE_OPT := -Oz -fvisibility=hidden -fno-semantic-interposition
 APP_RELEASE_LINK_FLAGS := -Wl,--gc-sections -Wl,--icf=all -s
 
+APP_SLIDE_APP_SRC := $(OUTDIR)/slide_app.issue591.c
+
 PRELOAD_SRCS := \
   src/main.c \
   src/util.c \
@@ -63,7 +65,7 @@ PRELOAD_SRCS := \
 APP_PRELOAD_SRCS := \
   src/main.c \
   src/util.c \
-  src/slide_app.c \
+  $(APP_SLIDE_APP_SRC) \
   src/fops.c \
   src/pipe.c \
   src/root.c \
@@ -104,6 +106,14 @@ s721w-release:
 
 $(OUTDIR):
 	mkdir -p $@
+
+# Issue #591 final S24 FE tuning: keep the repository source untouched while
+# making the same slide_app.c requeue timing changes used by the working build.
+$(APP_SLIDE_APP_SRC): src/slide_app.c | $(OUTDIR)
+	sed \
+	  -e 's/^#define SLIDE_REQUEUE_MAX_POLLS 1000$$/#define SLIDE_REQUEUE_MAX_POLLS 100/' \
+	  -e 's/^#define SLIDE_REQUEUE_POLL_USEC 1000$$/#define SLIDE_REQUEUE_POLL_USEC 200/' \
+	  $< > $@
 
 $(PRELOAD): $(PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h src/kernelsnitch/*.h | $(OUTDIR)
 	$(TARGET_CC) -fPIC $(COMMON_CFLAGS) $(PRELOAD_SRCS) \
