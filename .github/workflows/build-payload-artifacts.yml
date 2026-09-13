@@ -8,6 +8,7 @@ on:
       - 'src/**'
       - 'Makefile'
       - 'support/targets-v3.json'
+      - 'kernelsu/**'
       - 'tools/**'
       - '.github/workflows/**'
   workflow_dispatch:
@@ -34,6 +35,7 @@ env:
   W_TARGET: r12s-S721WVLSCDZF4
   B_ARTIFACT_PATH: artifacts/r12s-S721BXXSCDZF3/cve-2026-43499-app.so
   W_ARTIFACT_PATH: artifacts/r12s-S721WVLSCDZF4/cve-2026-43499-app.so
+  B_KSUD_PATH: kernelsu/ksud-r12s-S721BXXSCDZF3-kdp
 
 jobs:
   build:
@@ -45,6 +47,39 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 2
+
+      - name: Verify repository metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('support/targets-v3.json').read_text())
+          target = next((p for p in manifest['payloads'] if p['payloadId'] == 'r12s-S721BXXSCDZF3'), None)
+          if target is None:
+              raise SystemExit('S721B payload entry is missing from support/targets-v3.json')
+
+          ksud = Path('kernelsu/ksud-r12s-S721BXXSCDZF3-kdp')
+          if not ksud.is_file():
+              raise SystemExit(f'Missing KernelSU artifact: {ksud}')
+
+          expected = target['kernelsu']['size']
+          actual = ksud.stat().st_size
+          if actual != expected:
+              raise SystemExit(f'KernelSU size mismatch: manifest={expected}, file={actual}')
+
+          url = target['kernelsu']['url']
+          if not url.endswith('/kernelsu/ksud-r12s-S721BXXSCDZF3-kdp'):
+              raise SystemExit(f'Unexpected S721B KernelSU URL: {url}')
+
+          print(f'S721B KernelSU metadata OK: {actual} bytes')
+          PY
+
+          file "${B_KSUD_PATH}"
+          readelf -h "${B_KSUD_PATH}" | grep -Eq 'Type:[[:space:]]+DYN|Type:[[:space:]]+EXEC'
+          readelf -h "${B_KSUD_PATH}" | grep -Eq 'Machine:[[:space:]]+AArch64'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
