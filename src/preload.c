@@ -16,6 +16,25 @@
 #endif
 #define APP_MIN_BOOT_UPTIME_SEC 120
 
+/*
+ * Pin the supervisor to CPU 0 for more stable race timing.
+ *
+ * This is deliberately best-effort: a failure to pin must never disable
+ * the existing exploit/fallback paths. The child keeps its existing CORE=0
+ * affinity path independently.
+ */
+static void supervisor_pin_cpu0(void) {
+  cpu_set_t mask;
+  CPU_ZERO(&mask);
+  CPU_SET(0, &mask);
+  if (sched_setaffinity(0, sizeof(mask), &mask) != 0) {
+    pr_warning("supervisor sched_setaffinity CPU0 failed errno=%d\n", errno);
+  } else {
+    pr_success("supervisor pinned to CPU 0 pid=%d\n", getpid());
+  }
+}
+
+
 #if defined(APP_PAYLOAD) && defined(SLIDE_P0_OFFSET_CANDIDATES)
 struct app_p0_shared_state {
   atomic_int dirty;
@@ -124,6 +143,7 @@ __attribute__((constructor)) static void load(void) {
   }
   started = 1;
   set_unbuffer();
+  supervisor_pin_cpu0();
   wait_for_boot_quiet_window();
 
   int max_attempts = env_int(
