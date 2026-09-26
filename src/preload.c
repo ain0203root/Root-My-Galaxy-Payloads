@@ -1,4 +1,21 @@
 #include "common.h"
+/*
+ * Pin supervisor to CPU 0.
+ *
+ * The child already calls pin_self_to_cpu0() inside run_exploit(), but
+ * pinning the supervisor here ensures it is on CPU 0 before any fork.
+ */
+static void supervisor_pin_cpu0(void) {
+  cpu_set_t mask;
+  CPU_ZERO(&mask);
+  CPU_SET(0, &mask);
+  if (sched_setaffinity(0, sizeof(mask), &mask) != 0) {
+    pr_warning("supervisor sched_setaffinity CPU0 failed errno=%d\n", errno);
+  } else {
+    pr_success("supervisor pinned to CPU 0 pid=%d\n", getpid());
+  }
+}
+
 
 #ifndef DEFAULT_EXPLOIT_ATTEMPTS
 #if defined(APP_PAYLOAD) && APP_PAYLOAD
@@ -124,6 +141,10 @@ __attribute__((constructor)) static void load(void) {
   }
   started = 1;
   set_unbuffer();
+
+  /* Pin the supervisor before any fork. */
+  supervisor_pin_cpu0();
+
   wait_for_boot_quiet_window();
 
   int max_attempts = env_int(
