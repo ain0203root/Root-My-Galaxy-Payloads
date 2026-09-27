@@ -5,6 +5,13 @@
 
 #include "offset.h"
 
+#ifndef MM_SEARCH_MODE
+#define MM_SEARCH_MODE 0
+#endif
+#if MM_SEARCH_MODE == 3
+#define QEMU_GDB_MM_ORACLE 1
+#endif
+
 #define PAGE_SHIFT 12
 #define PAGE_SIZE (1UL << PAGE_SHIFT)
 #define KS_PAGE_SIZE 4096
@@ -401,6 +408,10 @@ void app_publish_p0_dirty(void);
 void app_publish_writer_started(void);
 int select_slide_payload_slot(uintptr_t offset);
 int select_slide_payload_index(size_t index);
+#if defined(QEMU_GDB_MM_ORACLE) && QEMU_GDB_MM_ORACLE
+int qemu_mm_gdb_oracle_leak(uintptr_t *mm_out, int *memfd_out);
+#endif
+
 #if defined(APP_PHYS_P0_ORACLE) && APP_PHYS_P0_ORACLE
 int app_trigger_fops_slide_route(void);
 #if (defined(APP_FOPS_ORACLE_DIAG_ONLY) && APP_FOPS_ORACLE_DIAG_ONLY) || \
