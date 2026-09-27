@@ -180,21 +180,48 @@ jobs:
           retention-days: 14
 
       - name: Commit regenerated artifacts
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/qemu-mm-trace-oracle-s24fe'
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if [ "${{ steps.select.outputs.build_b }}" = "1" ]; then
-            git add "${B_ARTIFACT_PATH}"
-          fi
-          if [ "${{ steps.select.outputs.build_w }}" = "1" ]; then
-            git add "${W_ARTIFACT_PATH}"
-          fi
-          if git diff --cached --quiet; then
-            echo "No artifact changes."
+
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            if [ "${{ steps.select.outputs.build_b }}" = "1" ]; then
+              git add "${B_ARTIFACT_PATH}"
+            fi
+            if [ "${{ steps.select.outputs.build_w }}" = "1" ]; then
+              git add "${W_ARTIFACT_PATH}"
+            fi
+            if git diff --cached --quiet; then
+              echo "No artifact changes."
+              exit 0
+            fi
+            git commit -m "ci: rebuild S721 FE payload artifacts [skip ci]"
+            git push origin HEAD:main
             exit 0
           fi
-          git commit -m "ci: rebuild S721 FE payload artifacts [skip ci]"
+
+          # The app resolves the payload feed from main. Publish only the
+          # freshly-built S721B artifact from this experimental branch into
+          # main; do not merge or push the experimental source tree.
+          experimental_artifact="${B_ARTIFACT_PATH}"
+          main_dir="$(dirname "${B_ARTIFACT_PATH}")"
+          tmp_artifact="/tmp/s721b-experimental-app.so"
+          install -m 0644 "${experimental_artifact}" "${tmp_artifact}"
+
+          git fetch origin main
+          git checkout --detach FETCH_HEAD
+          mkdir -p "${main_dir}"
+          install -m 0644 "${tmp_artifact}" "${B_ARTIFACT_PATH}"
+          git add "${B_ARTIFACT_PATH}"
+
+          if git diff --cached --quiet; then
+            echo "Main already contains this S721B artifact."
+            exit 0
+          fi
+
+          git commit -m "ci: publish experimental S721B payload [skip ci]"
           git push origin HEAD:main
+
