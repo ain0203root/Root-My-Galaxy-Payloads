@@ -5,7 +5,7 @@ This is a diagnostic path for the classic S24 FE KernelSnitch mm_struct search. 
 ## Build
 
 ```sh
-make TARGET=r12s-S721BXXSCDZF3 QEMU_MM_TRACE_VALIDATE=1 \
+make TARGET=r12s-S721BXXSCDZF3 MM_SEARCH_MODE=2 \
   ANDROID_NDK_HOME=/path/to/android-ndk
 ```
 
@@ -48,8 +48,8 @@ The validation path drains the trace stream immediately before `clone_leak_child
 A successful comparison logs:
 
 ```text
-qemu mm validate captured mm=...
-qemu mm validate ks=... actual=... exact=1 page=1
+qemu mm oracle captured mm=...
+qemu mm oracle ks=... actual=... exact=1 page=1
 ```
 
 `exact=1` means the addresses match. `page=1` means the addresses are in the same order-3 page.
@@ -57,7 +57,7 @@ qemu mm validate ks=... actual=... exact=1 page=1
 A mismatch is logged as:
 
 ```text
-qemu mm validate mismatch ks=... actual=...
+qemu mm oracle mismatch ks=... actual=...
 ```
 
 and the attempt is discarded.
