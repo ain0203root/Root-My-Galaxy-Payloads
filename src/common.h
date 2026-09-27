@@ -5,6 +5,13 @@
 
 #include "offset.h"
 
+#ifndef MM_SEARCH_MODE
+#define MM_SEARCH_MODE 0
+#endif
+#if MM_SEARCH_MODE == 2
+#define QEMU_MM_TRACE_ORACLE 1
+#endif
+
 #define PAGE_SHIFT 12
 #define PAGE_SIZE (1UL << PAGE_SHIFT)
 #define KS_PAGE_SIZE 4096
@@ -362,6 +369,9 @@ pid_t clone_child(void);
 pid_t clone_leak_child(void);
 int open_memfd(pid_t child);
 void kill_child(pid_t child);
+#if defined(QEMU_MM_TRACE_ORACLE) && QEMU_MM_TRACE_ORACLE
+int qemu_mm_oracle_leak(uintptr_t *mm_out, int *memfd_out);
+#endif
 void close_reclaim_sockets(void);
 int reclaim_receiver_fd(void);
 void setup_kernelsnitch(void);
