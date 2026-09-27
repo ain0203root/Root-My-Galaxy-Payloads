@@ -965,7 +965,7 @@ static int qemu_mm_trace_read(uintptr_t *mm_out) {
     }
   }
 
-  pr_error("qemu mm trace missed pid=%d\n", target_pid);
+  pr_error("qemu mm trace missed pid=%d\n", getpid());
   return 0;
 }
 #endif
