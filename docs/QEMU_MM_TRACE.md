@@ -30,6 +30,9 @@ echo 1 > /sys/kernel/tracing/tracing_on
 
 exec 3< /sys/kernel/tracing/trace_pipe
 QEMU_MM_TRACE_FD=3 LD_PRELOAD=/root/cve-2026-43499-app.so /bin/sh
+
+# The explicit FD is optional with the current S721B oracle:
+LD_PRELOAD=/root/cve-2026-43499-app.so /bin/sh
 ```
 
 The exact payload path depends on where the artifact was copied into the guest.
