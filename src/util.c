@@ -801,6 +801,13 @@ static int qemu_mm_trace_ready(void) {
     return 0;
   }
   qemu_mm_trace_fd = (int)parsed;
+  int flags = fcntl(qemu_mm_trace_fd, F_GETFL, 0);
+  if (flags < 0 || fcntl(qemu_mm_trace_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+    pr_error("qemu mm trace fd nonblock failed fd=%d errno=%d\n",
+             qemu_mm_trace_fd, errno);
+    qemu_mm_trace_fd = -1;
+    return 0;
+  }
   return 1;
 }
 
