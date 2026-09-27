@@ -1,21 +1,30 @@
-# QEMU MM Trace validation
+# QEMU MM Trace oracle
 
-This is a diagnostic path for the classic S24 FE KernelSnitch mm_struct search. It does not replace the existing reclaim route and it is not enabled by default in the target profile.
+This is the experimental S24 FE path where the payload gets the `mm_struct` address from the guest kernel trace stream instead of using KernelSnitch for the S721 MM search.
 
 ## Build
+
+The S721B target on this branch selects `MM_SEARCH_MODE=2` from its target profile:
+
+```sh
+make TARGET=r12s-S721BXXSCDZF3 \
+  ANDROID_NDK_HOME=/path/to/android-ndk
+```
+
+The mode is also explicit and can be inspected with:
 
 ```sh
 make TARGET=r12s-S721BXXSCDZF3 MM_SEARCH_MODE=2 \
   ANDROID_NDK_HOME=/path/to/android-ndk
 ```
 
-At runtime the payload expects an inherited descriptor named by `QEMU_MM_TRACE_FD=<fd number>`.
+In mode 2, the classic `mm_struct` search in both `prepare_kernel_page()` and the pipe-page preparation path skips the KernelSnitch collision/bruteforce stage and uses the QEMU trace oracle.
 
-The payload switches the inherited descriptor to non-blocking mode itself.
+At runtime the payload expects an inherited descriptor named by `QEMU_MM_TRACE_FD=<fd number>`. The payload switches that descriptor to non-blocking mode itself.
 
 ## QEMU guest-side trace setup
 
-The Samsung QEMU environment boots the Samsung kernel image inside the Buildroot/DEFEX guest. Inside that guest, enable the kmem_cache_alloc tracepoint and clear the buffer before starting the payload:
+The Samsung QEMU environment boots the Samsung kernel image inside the Buildroot/DEFEX guest. Inside that guest, enable the `kmem_cache_alloc` tracepoint and clear the buffer before starting the payload:
 
 ```sh
 mount -t tracefs tracefs /sys/kernel/tracing 2>/dev/null || true
@@ -32,38 +41,57 @@ QEMU_MM_TRACE_FD=3 LD_PRELOAD=/root/cve-2026-43499-app.so /bin/sh
 
 The exact payload path depends on where the artifact was copied into the guest.
 
-The important part is that FD 3 is inherited by the LD_PRELOAD process.
+FD 3 must be inherited by the LD_PRELOAD process.
 
 ## What the payload matches
 
-The parser accepts a trace record when it contains:
+The parser looks for a trace record containing:
 
 - `kmem_cache_alloc:`
 - `ptr=<address>`
 - `call_site=copy_mm+...` or `call_site=mm_alloc+...`
-- the payload process PID
+- the payload process PID as the trace `common_pid`
 
-The validation path drains the trace stream immediately before `clone_leak_child()`, captures the resulting oracle address, and compares it with the existing KernelSnitch result for the same child.
+Immediately before the dedicated clone, the payload drains older trace data. It then creates one controlled child, opens `/proc/<pid>/mem` for that child, and reads the next matching allocation record as the oracle address.
 
-A successful comparison logs:
+The returned memfd is kept open through the same later reclaim window where the old path kept `memfd_leak` open. This preserves the existing lifetime relationship instead of merely treating the address as a diagnostic value.
 
-```text
-qemu mm oracle captured mm=...
-qemu mm oracle ks=... actual=... exact=1 page=1
-```
+## What changed in S721
 
-`exact=1` means the addresses match. `page=1` means the addresses are in the same order-3 page.
-
-A mismatch is logged as:
+Mode 2 changes the MM search source only:
 
 ```text
-qemu mm oracle mismatch ks=... actual=...
+old:
+  child clone
+    -> KernelSnitch collision finding
+    -> KernelSnitch bruteforce
+    -> ks->mm_struct
+
+new:
+  child clone
+    -> guest kmem_cache_alloc trace
+    -> qemu_mm_oracle_leak()
+    -> oracle mm_struct
 ```
 
-and the attempt is discarded.
+The later S721 page-base checks, object-index checks, payload construction, reclaim sequence, P0 logic, FOPS/slide logic and pipe-stage logic remain in place.
 
-## Scope
+KernelSnitch code is still present in the repository because other target profiles use it. In this branch it is not used by the S721B mode-2 MM search path.
 
-The repository contains the payload-side consumer. It does not patch the QEMU executable itself to invent a new trace format. The diagnostic setup above uses the guest kernel's tracefs stream while the kernel is running under QEMU.
+## Important limitation
 
-`QEMU_MM_TRACE_ORACLE` remains a separate path and is not enabled by this guide.
+The repository contains the payload-side trace consumer. The Samsung QEMU tree checked for this work does not contain a custom `mm_struct` trace implementation; the oracle currently relies on the guest kernel's tracefs stream while that kernel is running under QEMU.
+
+The end-to-end combination of the S721 kernel, tracefs event format and `trace_pipe` FD inheritance still needs to be verified in the actual QEMU guest. In particular, the parser currently expects `common_pid` to identify the payload-side parent that issued the clone.
+
+A successful oracle capture is logged as:
+
+```text
+qemu mm oracle captured mm=... memfd=... pid=...
+```
+
+A failed capture is logged as:
+
+```text
+qemu mm oracle leak failed
+```
