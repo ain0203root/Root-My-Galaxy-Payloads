@@ -11,13 +11,6 @@ make TARGET=r12s-S721BXXSCDZF3 \
   ANDROID_NDK_HOME=/path/to/android-ndk
 ```
 
-The mode is also explicit and can be inspected with:
-
-```sh
-make TARGET=r12s-S721BXXSCDZF3 MM_SEARCH_MODE=2 \
-  ANDROID_NDK_HOME=/path/to/android-ndk
-```
-
 In mode 2, the classic `mm_struct` search in both `prepare_kernel_page()` and the pipe-page preparation path skips the KernelSnitch collision/bruteforce stage and uses the QEMU trace oracle.
 
 At runtime the payload expects an inherited descriptor named by `QEMU_MM_TRACE_FD=<fd number>`. The payload switches that descriptor to non-blocking mode itself.
