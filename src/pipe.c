@@ -140,6 +140,15 @@ uintptr_t prepare_pipe_buffer_page_child(void) {
 #if MM_SEARCH_MODE == 2
   if (!qemu_mm_oracle_leak(&leaked, &leak_memfd)) {
     pr_error("pipe QEMU mm oracle search failed\n");
+    for (size_t i = 0; i < prep.mm_cnt; i++) {
+      kill_child(prep.childs[i]);
+    }
+    for (size_t i = 0; i < spray.mm_cnt; i++) {
+      kill_child(spray.childs[i]);
+    }
+    for (size_t i = 0; i < pre.mm_cnt; i++) {
+      kill_child(pre.childs[i]);
+    }
     close_ctx_memfds(&prep);
     close_ctx_memfds(&spray);
     close_ctx_memfds(&pre);
