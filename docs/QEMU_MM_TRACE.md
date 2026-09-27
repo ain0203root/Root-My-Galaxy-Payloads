@@ -13,7 +13,7 @@ make TARGET=r12s-S721BXXSCDZF3 \
 
 In mode 2, the classic `mm_struct` search in both `prepare_kernel_page()` and the pipe-page preparation path skips the KernelSnitch collision/bruteforce stage and uses the QEMU trace oracle.
 
-At runtime the payload expects an inherited descriptor named by `QEMU_MM_TRACE_FD=<fd number>`. The payload switches that descriptor to non-blocking mode itself.
+At runtime `QEMU_MM_TRACE_FD=<fd number>` is optional. When supplied, the payload uses the inherited descriptor and switches it to non-blocking mode. When omitted, the S721B payload configures the guest tracefs event itself and opens `/sys/kernel/tracing/trace_pipe`.
 
 ## QEMU guest-side trace setup
 
@@ -35,9 +35,7 @@ QEMU_MM_TRACE_FD=3 LD_PRELOAD=/root/cve-2026-43499-app.so /bin/sh
 LD_PRELOAD=/root/cve-2026-43499-app.so /bin/sh
 ```
 
-The exact payload path depends on where the artifact was copied into the guest.
-
-FD 3 must be inherited by the LD_PRELOAD process.
+The exact payload path depends on where the artifact was copied into the guest. The explicit-FD form is retained for external trace harnesses; the current S721B path does not require it.
 
 ## What the payload matches
 
@@ -78,7 +76,7 @@ KernelSnitch code is still present in the repository because other target profil
 
 The repository contains the payload-side trace consumer. The Samsung QEMU tree checked for this work does not contain a custom `mm_struct` trace implementation; the oracle currently relies on the guest kernel's tracefs stream while that kernel is running under QEMU.
 
-The end-to-end combination of the S721 kernel, tracefs event format and `trace_pipe` FD inheritance still needs to be verified in the actual QEMU guest. In particular, the parser currently expects `common_pid` to identify the payload-side parent that issued the clone.
+The end-to-end combination of the S721 kernel, tracefs event format and self-opened `trace_pipe` still needs to be verified in the actual QEMU guest. The parser matches `common_pid` against the payload-side parent PID because `copy_mm()` / `mm_alloc()` run in the cloning parent context.
 
 A successful oracle capture is logged as:
 
