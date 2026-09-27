@@ -2204,6 +2204,12 @@ uintptr_t prepare_kernel_page(int payload_mode) {
     for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
       kill_child(prepare_ctx.childs[i]);
     }
+    for (size_t i = 0; i < spray_ctx.mm_cnt; i++) {
+      kill_child(spray_ctx.childs[i]);
+    }
+    for (size_t i = 0; i < pre_ctx.mm_cnt; i++) {
+      kill_child(pre_ctx.childs[i]);
+    }
     cleanup_page_prepare_state();
     return 0;
   }
