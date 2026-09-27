@@ -817,7 +817,7 @@ static int qemu_mm_trace_ready(void) {
     errno = 0;
     long parsed = strtol(value, &end, 10);
     if (errno || end == value || *end || parsed < 0 ||
-        parsed > INT_MAX || fcntl((int)parsed, F_GETFD) < 0) {
+        parsed > 0x7fffffffL || fcntl((int)parsed, F_GETFD) < 0) {
       pr_error("qemu mm trace fd invalid value=%s errno=%d\n", value, errno);
       return 0;
     }
@@ -920,11 +920,12 @@ static int qemu_mm_trace_drain(void) {
   }
 }
 
-static int qemu_mm_trace_read(pid_t target_pid, uintptr_t *mm_out) {
+static int qemu_mm_trace_read(uintptr_t *mm_out) {
   char data[16384];
   char pid_token[32];
 
-  snprintf(pid_token, sizeof(pid_token), "-%d ", target_pid);
+  /* copy_mm()/mm_alloc() execute in the cloning parent, not the child. */
+  snprintf(pid_token, sizeof(pid_token), "-%d ", getpid());
   for (size_t retry = 0; retry < 200; ++retry) {
     ssize_t size = read(qemu_mm_trace_fd, data, sizeof(data) - 1);
     if (size < 0) {
@@ -1000,7 +1001,7 @@ int qemu_mm_oracle_leak(uintptr_t *mm_out, int *memfd_out) {
 
   child = clone_child();
   fd = open_memfd(child);
-  if (!qemu_mm_trace_read(child, mm_out)) {
+  if (!qemu_mm_trace_read(mm_out)) {
     close(fd);
     kill_child(child);
     qemu_mm_trace_stop();
