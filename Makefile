@@ -48,10 +48,6 @@ APP_STABLE := $(OUTDIR)/cve-2026-43499-app.stable.so
 APP_RELEASE_SIZE := 104128
 ROOT_HELPER := $(OUTDIR)/cve-2026-43499-root
 TARGET_CFLAGS :=
-QEMU_MM_TRACE_VALIDATE ?= 0
-ifneq ($(QEMU_MM_TRACE_VALIDATE),0)
-TARGET_CFLAGS += -DQEMU_MM_TRACE_VALIDATE=$(QEMU_MM_TRACE_VALIDATE)
-endif
 APP_RELEASE_OPT := -Oz -fvisibility=hidden -fno-semantic-interposition
 APP_RELEASE_LINK_FLAGS := -Wl,--gc-sections -Wl,--icf=all -s
 
