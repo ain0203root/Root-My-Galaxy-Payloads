@@ -2191,7 +2191,8 @@ static uintptr_t prepare_controlled_kernel_page(int payload_mode) {
 }
 #endif
 
-#if defined(APP_PHYS_VIRTUAL_BASE_ORACLE) && APP_PHYS_VIRTUAL_BASE_ORACLE
+#if (defined(APP_PHYS_VIRTUAL_BASE_ORACLE) && APP_PHYS_VIRTUAL_BASE_ORACLE) || \
+    (defined(APP_SMART_MM_SEARCH) && APP_SMART_MM_SEARCH)
 static void cleanup_failed_kernel_page(const char *reason) {
   pr_info("kernel page cleanup failure=%s stage=kernelsnitch begin\n", reason);
   kernelsnitch_cleanup(ks);
