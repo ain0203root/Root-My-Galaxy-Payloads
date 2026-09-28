@@ -88,3 +88,6 @@ A failed capture is logged as:
 ```text
 qemu mm oracle leak failed
 ```
+
+
+CI publication note: the QEMU oracle artifact is published separately from the stable S721B payload.
