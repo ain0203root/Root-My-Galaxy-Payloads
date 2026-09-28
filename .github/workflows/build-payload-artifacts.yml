@@ -35,6 +35,7 @@ env:
   B_TARGET: r12s-S721BXXSCDZF3
   W_TARGET: r12s-S721WVLSCDZF4
   B_ARTIFACT_PATH: artifacts/r12s-S721BXXSCDZF3/cve-2026-43499-app.so
+  B_QEMU_ARTIFACT_PATH: artifacts/r12s-S721BXXSCDZF3/qemu/cve-2026-43499-app.so
   W_ARTIFACT_PATH: artifacts/r12s-S721WVLSCDZF4/cve-2026-43499-app.so
   B_KSUD_PATH: kernelsu/ksud-r12s-S721BXXSCDZF3-kdp
 
@@ -207,21 +208,21 @@ jobs:
           # freshly-built S721B artifact from this experimental branch into
           # main; do not merge or push the experimental source tree.
           experimental_artifact="${B_ARTIFACT_PATH}"
-          main_dir="$(dirname "${B_ARTIFACT_PATH}")"
-          tmp_artifact="/tmp/s721b-experimental-app.so"
+          main_dir="$(dirname "${B_QEMU_ARTIFACT_PATH}")"
+          tmp_artifact="/tmp/s721b-qemu-oracle-app.so"
           install -m 0644 "${experimental_artifact}" "${tmp_artifact}"
 
           git fetch origin main
           git checkout --detach FETCH_HEAD
           mkdir -p "${main_dir}"
-          install -m 0644 "${tmp_artifact}" "${B_ARTIFACT_PATH}"
-          git add "${B_ARTIFACT_PATH}"
+          install -m 0644 "${tmp_artifact}" "${B_QEMU_ARTIFACT_PATH}"
+          git add "${B_QEMU_ARTIFACT_PATH}"
 
           if git diff --cached --quiet; then
-            echo "Main already contains this S721B artifact."
+            echo "Main already contains this S721B QEMU oracle artifact."
             exit 0
           fi
 
-          git commit -m "ci: publish experimental S721B payload [skip ci]"
+          git commit -m "ci: publish S721B QEMU oracle artifact [skip ci]"
           git push origin HEAD:main
 
