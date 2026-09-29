@@ -11,6 +11,9 @@ on:
       - 'kernelsu/**'
       - 'tools/**'
       - '.github/workflows/**'
+  pull_request:
+    types:
+      - closed
   workflow_dispatch:
     inputs:
       target:
@@ -39,6 +42,7 @@ env:
 
 jobs:
   build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
     name: Build selected S24 FE profile(s)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -46,6 +50,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 2
 
       - name: Verify repository metadata
