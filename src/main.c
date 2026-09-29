@@ -731,3 +731,4 @@ int run_exploit(int argc, char **argv) {
 #endif
   return exploit_ok ? 0 : 1;
 }
+/* CI rebuild trigger: no runtime behavior change. */
