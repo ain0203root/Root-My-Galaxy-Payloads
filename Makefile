@@ -154,3 +154,5 @@ info:
 
 clean:
 	rm -rf $(OUTDIR)
+
+# Rebuild marker: force CI to regenerate the S721B release artifact.
