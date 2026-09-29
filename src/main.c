@@ -434,7 +434,7 @@ static int run_rmg_exploit_test(void) {
     return -1;
   }
 
-  pr_info("rmg-test start stage=%s\\n", stage);
+  pr_info("rmg-test start stage=%s\n", stage);
 
   if (strcmp(stage, "kaslr") == 0) {
     ok = slide_leak_kernel_base();
@@ -456,20 +456,20 @@ static int run_rmg_exploit_test(void) {
     reset_pipe_attempt();
     result_value = prepare_pipe_buffer_page();
     ok = is_direct_ptr(result_value);
-    pr_info("rmg-test pipe-page base=%016zx\\n", result_value);
+    pr_info("rmg-test pipe-page base=%016zx\n", result_value);
     reset_pipe_attempt();
   } else {
-    pr_error("rmg-test unknown stage=%s\\n", stage);
+    pr_error("rmg-test unknown stage=%s\n", stage);
     return 1;
   }
 
   if (ok) {
-    pr_success("rmg-test completed stage=%s result=pass value=%016zx\\n",
+    pr_success("rmg-test completed stage=%s result=pass value=%016zx\n",
                stage, result_value);
     return 0;
   }
 
-  pr_error("rmg-test completed stage=%s result=fail value=%016zx\\n",
+  pr_error("rmg-test completed stage=%s result=fail value=%016zx\n",
            stage, result_value);
   return 1;
 }
