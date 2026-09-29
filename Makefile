@@ -84,6 +84,7 @@ COMMON_CFLAGS := \
   -O2 -g0 -Wall -Wextra \
   -Wno-unused-parameter -Wno-sign-compare \
   -Isrc -DTARGET_HEADER='"$(TARGET_INCLUDE)"' \
+  -DQEMU_MM_TRACE_ORACLE \
   $(TARGET_CFLAGS)
 
 .DEFAULT_GOAL := all
