@@ -447,11 +447,15 @@ static int run_rmg_exploit_test(void) {
     result_value = prepare_good_kernel_page(PAGE_PAYLOAD_FOPS);
     ok = is_direct_ptr(result_value);
     reset_pipe_attempt();
+    close_reclaim_sockets();
+    cleanup_page_prepare_state();
   } else if (strcmp(stage, "mm_page") == 0) {
     reset_pipe_attempt();
     result_value = prepare_good_kernel_page(PAGE_PAYLOAD_FOPS);
     ok = is_direct_ptr(result_value);
     reset_pipe_attempt();
+    close_reclaim_sockets();
+    cleanup_page_prepare_state();
   } else if (strcmp(stage, "pipe_page") == 0) {
     reset_pipe_attempt();
     result_value = prepare_pipe_buffer_page();
